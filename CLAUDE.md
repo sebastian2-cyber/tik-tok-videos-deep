@@ -11,7 +11,8 @@ Nicht nachfragen, außer der Nutzer wünscht ein bestimmtes Thema.
 2. Skript schreiben: `scripts/NNN_kurzname.json` (nächste freie Nummer). Format siehe unten.
 3. Rendern:
    ```
-   pip install -q edge-tts numpy pillow   # falls nötig
+   pip install -q -r engine/requirements.txt   # falls nötig
+   python3 engine/make_video.py scripts/NNN_kurzname.json --preview   # erst prüfen
    python3 engine/make_video.py scripts/NNN_kurzname.json
    ```
    Ergebnis: `videos/NNN_kurzname.mp4` (1920x1080, 16:9 wie die Originale).
@@ -24,10 +25,14 @@ Nicht nachfragen, außer der Nutzer wünscht ein bestimmtes Thema.
 
 ## Stimme
 
-- Immer dieselbe Stimme. Wenn `ELEVENLABS_API_KEY` gesetzt ist (oder Datei `.elevenlabs_key`):
-  ElevenLabs „Brian“ (`nPczCjzI2devNBz1zQrb`), Modell `eleven_multilingual_v2` – tief, ruhig, Erzähler.
-- Sonst Fallback: Microsoft `de-DE-FlorianMultilingualNeural` (kostenlos, kein Key).
+- ElevenLabs-Key: Umgebungsvariable `ELEVENLABS_API_KEY` oder Datei `.elevenlabs_key` (nie committen!).
+- Reihenfolge (automatisch): `ELEVENLABS_VOICE_ID` → „Simon – Deep and Strong“ (deutscher Muttersprachler,
+  braucht Bezahl-Plan) → „Brian“ (Free-Plan). Modell `eleven_multilingual_v2`.
+- Ohne Key: Fallback Microsoft `de-DE-FlorianMultilingualNeural` (klingt deutlich schlechter).
+- Free-Plan = 10.000 Zeichen/Monat ≈ 9 Videos. Sprachausgaben werden in `.cache/tts` gecacht,
+  Neu-Rendern kostet also nichts. Erst mit `--preview` (halbe Auflösung, schnell) prüfen, dann final.
 - Zahlen, die anders gesprochen werden als geschrieben → Feld `"say"` mit ausgeschriebenem Text.
+- Optional `PEXELS_API_KEY` (kostenlos auf pexels.com/api) → viel bessere kinoartige Clips.
 
 ## Stil der Referenzvideos (savetik*.mp4 – Kanal @ronneson)
 
@@ -60,24 +65,29 @@ Nicht nachfragen, außer der Nutzer wünscht ein bestimmtes Thema.
 ```json
 {
   "title": "Kurzer Titel",
-  "caption": "TikTok-Beschreibung mit Hashtags #wissen #universum #fyp",
+  "caption": "TikTok-Beschreibung #wissen #universum #fyp",
+  "style": "type",
   "beats": [
-    {"text": "Was wäre, wenn du noch *nie* etwas berührt hast?", "clip": ["hand touching", "hand"]},
-    {"text": "Nicht mal den Menschen, den du am meisten [LIEBST]", "clip": ["couple holding hands", "couple"]},
-    {"text": "Und ein Atom ist zu *99,9999 %* leer.", "say": "Und ein Atom ist zu neunundneunzig Komma neun neun neun neun Prozent leer.", "clip": ["nebula", "space"]},
-    {"text": "Alles besteht aus *Atomen.*", "clip": ["particles"], "bg": "ATOME"},
-    {"text": "hast du es *gespürt.*", "clip": ["hug"], "same_clip": true}
+    {"text": "Was wäre, wenn ich dir sage, dass du *älter* bist als die Erde?", "clip": ["earth from space", "earth"]},
+    {"text": "Nicht du selbst. / Aber fast alles, woraus du *bestehst.*", "clip": ["galaxy", "nebula"]},
+    {"text": "Bei über *100 Millionen Grad.*", "say": "Bei über hundert Millionen Grad.", "clip": ["fire"], "bg": "100.000.000°"},
+    {"text": "Und als diese Sterne starben, / explodierten sie als [SUPERNOVA]", "clip": ["explosion space"]},
+    {"text": "Wir leben im Jahr {1729}", "clip": ["earth"]}
   ]
 }
 ```
 
-- Ein Beat = ein Satz oder Satzteil = ein Clip. Satzteile ohne Satzzeichen am Ende werden
-  automatisch mit dem nächsten Beat zusammen gesprochen (natürliche Betonung), aber trotzdem geschnitten.
-- `*wort*` gelb · `[WORT]` riesig (am Satzende, danach Pause) · `bg` riesiges Hintergrundwort
-- `clip`: englische Suchbegriffe für Mixkit, bester zuerst. Einfache Wörter funktionieren am besten
-  (space, galaxy, earth, ocean, sunset, silhouette, hug, brain, lightning, city night, forest, particles …).
-- `same_clip: true` = gleicher Clip läuft weiter · `pause` = Pause nach dem Satz in Sekunden (Standard 0.38)
-- Optional auf oberster Ebene: `"handle": "@deinname"` (Wasserzeichen), `"music_volume": 0.22`.
+- `style`: `"type"` (Weltall-/Gefühls-Videos: Schreibmaschinen-Text, Blöcke über mehrere Zeilen,
+  Bass-Hit + Schwarz-Schnitt nach großem Wort) oder `"glitch"` (Geschichte/Mystery/Verschwörung:
+  Film-Look, Korn, Flackern, RGB-Glitches, kleine gelbe Untertitel unten, riesige Wörter in der Mitte).
+- `*wort*` gelb · `[WORT]` riesig gelb am Satzende → Bass-Hit, danach Schwarz, nur das Wort bleibt
+  (2–4 Mal pro Video, an den stärksten Stellen) · `{WORT}` riesiges Hintergrundwort, erscheint wenn
+  es gesprochen wird (im Glitch-Stil oft nutzen: Jahreszahlen, „KRIEG“, „KAISER“) · `bg` = Hintergrundwort
+  ab Beat-Start · ` / ` = neuer Textblock.
+- Ein Beat = ein Clip. Beats ohne Satzzeichen am Ende werden mit dem nächsten zusammen gesprochen.
+- `clip`: englische Suchbegriffe, bester zuerst, einfache Wörter.
+- `same_clip: true` = Clip läuft weiter · `pause` = Pause danach (Sek.) · `black: false` = kein Schwarz-Schnitt
+- Optional: `"music_volume": 0.24`, `"boom_volume": 0.5`.
 
 ## Technik
 

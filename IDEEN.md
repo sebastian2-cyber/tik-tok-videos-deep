@@ -6,7 +6,7 @@ Erledigte Ideen mit [x] markieren und die Skript-Nummer dahinter schreiben.
 - [ ] Das Licht der Sterne, die du siehst – viele davon gibt es vielleicht schon nicht mehr
 - [ ] Du siehst nie die Gegenwart – dein Gehirn zeigt dir die Vergangenheit (ca. 80 ms Verzögerung)
 - [ ] Was passiert, wenn du in ein Schwarzes Loch fällst (Zeit, Spaghettifizierung, Ereignishorizont)
-- [ ] Jedes Atom in deinem Körper wurde in einem Stern geschmiedet – du bist Sternenstaub
+- [x] Jedes Atom in deinem Körper wurde in einem Stern geschmiedet – du bist Sternenstaub → 002
 - [ ] Wie groß ist das Universum wirklich? (Sandkörner vs. Sterne, beobachtbares Universum)
 - [ ] Die Erde rast gerade mit ca. 107.000 km/h um die Sonne – und du spürst nichts
 - [ ] Was wäre, wenn die Sonne jetzt verschwindet? (8 Minuten 20 Sekunden merkst du nichts)

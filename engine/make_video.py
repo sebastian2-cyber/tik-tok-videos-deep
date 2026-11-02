@@ -1,448 +1,518 @@
 #!/usr/bin/env python3
 """Baut ein fertiges TikTok-Video aus einem Skript (JSON) im Stil der Referenzvideos.
 
-Ablauf: Stimme (ElevenLabs oder kostenloser Fallback) -> Stock-Clips (Mixkit)
--> abgedunkelter Hintergrund mit langsamem Zoom -> Wort-für-Wort-Untertitel
--> Hintergrundmusik -> MP4.
+Zwei Stile (Feld "style" im Skript):
+  "type"   – wie die Weltall-Videos: Text wird Buchstabe für Buchstabe zur Stimme getippt,
+             baut sich über mehrere Zeilen auf, Schlüsselwort riesig in Gelb, danach Schnitt auf
+             Schwarz und nur das Schlüsselwort bleibt stehen.
+  "glitch" – wie das 1729-Video: Film-Look, Korn, Flackern, RGB-Glitches, kleine gelbe Untertitel
+             unten, riesige Wörter/Zahlen in der Mitte, die Zeichen für Zeichen erscheinen.
 
 Aufruf:
-    python3 engine/make_video.py scripts/001_beruehrung.json
-    python3 engine/make_video.py scripts/001_beruehrung.json --vertical
+    python3 engine/make_video.py scripts/002_xyz.json [--vertical] [--preview]
 """
 import argparse
-import asyncio
-import base64
-import hashlib
 import json
 import os
 import random
 import re
 import shutil
-import ssl
 import subprocess
 import sys
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-ROOT = Path(__file__).resolve().parent.parent
-ENGINE = ROOT / "engine"
-FONTS = ENGINE / "fonts"
-CACHE = ROOT / ".cache"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sources as S  # noqa: E402
+
+ROOT = S.ROOT
+FONTS = ROOT / "engine" / "fonts"
+CACHE = S.CACHE
 MUSIC = ROOT / "Ohsxnta - changes (intro only) slowed.mp3"
-CA = "/root/.ccr/ca-bundle.crt"
-
-# --- Stil (aus den Referenzvideos abgeleitet) ---------------------------------
-WHITE = (240, 240, 236)
-YELLOW = (236, 196, 28)          # Gelb der Highlight-Wörter
-SR = 44100
+SR = S.SR
 FPS = 30
-PAUSE = 0.38                     # Pause zwischen zwei Sätzen
-DARKEN = 0.50                    # wie stark der Clip abgedunkelt wird
 
-# Stimme: immer dieselbe.
-ELEVEN_VOICE = "nPczCjzI2devNBz1zQrb"   # "Brian" – tief, ruhig, Erzähler (Standardstimme, im Free-Plan nutzbar)
-ELEVEN_MODEL = "eleven_multilingual_v2"
-EDGE_VOICE = "de-DE-FlorianMultilingualNeural"
+WHITE = (238, 238, 234)
+YELLOW = (238, 196, 26)
+PAUSE = 0.35          # Pause nach einem Satz
+BLACK_HOLD = 0.85     # Schwarz-Pause nach einem großen Schlusswort
 
 
-def ssl_ctx():
-    return ssl.create_default_context(cafile=CA) if os.path.exists(CA) else ssl.create_default_context()
-
-
-def http(url, data=None, headers=None, timeout=60):
-    req = urllib.request.Request(url, data=data, headers={"User-Agent": "Mozilla/5.0", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx()) as r:
-        return r.read()
-
-
-def run(cmd):
-    p = subprocess.run(cmd, capture_output=True, text=True)
-    if p.returncode != 0:
-        sys.stderr.write(p.stderr[-3000:])
-        raise SystemExit(f"Befehl fehlgeschlagen: {' '.join(map(str, cmd[:6]))} ...")
-    return p.stdout
-
-
-def probe_duration(path):
-    return float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)]).strip())
-
-
-# --- Skript-Markup ------------------------------------------------------------
-# *wort*   -> gelb hervorgehoben
-# [WORT]   -> riesig, eigene Einblendung (wie "ALIVE", "YOU")
-# "say"    -> optional abweichender Sprechtext (z. B. Zahlen ausgeschrieben)
+# ---------------------------------------------------------------------------
+# Skript-Markup
+#   *wort*     gelb
+#   [WORT]     riesig + gelb, danach Schnitt auf Schwarz (nur das Wort bleibt)
+#   {WORT}     riesiges Hintergrundwort, erscheint genau wenn es gesprochen wird
+#   " / "      neuer Textblock
+# ---------------------------------------------------------------------------
 
 def parse_tokens(text):
-    """Zerlegt den Untertiteltext in Wörter mit Stil-Info (*...* = gelb, [...] = riesig)."""
-    tokens, mode = [], "normal"
+    tokens, mode = [], None
     for raw in text.split():
-        style = mode
+        if raw == "/":
+            if tokens:
+                tokens[-1]["brk"] = True
+            continue
+        style = mode or "normal"
         if raw.startswith("*"):
-            style = "hl"
-            mode = "hl"
-        if raw.startswith("["):
-            style = "big"
-            mode = "big"
+            style = mode = "hl"
+        elif raw.startswith("["):
+            style = mode = "big"
+        elif raw.startswith("{"):
+            style = mode = "bgw"
         core = raw.rstrip(".,!?:;…\"'")
-        if (mode == "hl" and core.endswith("*")) or (mode == "big" and "]" in raw):
-            mode = "normal"
-        tokens.append({"word": raw.replace("*", "").replace("[", "").replace("]", ""), "style": style})
+        if (mode == "hl" and core.endswith("*")) or (mode == "big" and "]" in raw) or (mode == "bgw" and "}" in raw):
+            mode = None
+        word = re.sub(r"[*\[\]{}]", "", raw)
+        tokens.append({"word": word, "style": style})
     return tokens
 
 
 def plain(text):
-    return text.replace("*", "").replace("[", "").replace("]", "")
+    return re.sub(r"[*\[\]{}]", "", text).replace(" / ", " ")
 
-
-def norm(s):
-    return re.sub(r"[^0-9a-zäöüß]", "", s.lower())
-
-
-# --- Stimme -------------------------------------------------------------------
-
-def tts_eleven(text, prev_text, next_text, key, out_mp3):
-    body = json.dumps({
-        "text": text,
-        "model_id": ELEVEN_MODEL,
-        "language_code": "de",
-        "previous_text": prev_text or None,
-        "next_text": next_text or None,
-        "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.15,
-                           "use_speaker_boost": True, "speed": 0.95},
-    }).encode()
-    res = json.loads(http(f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}/with-timestamps",
-                          data=body, headers={"xi-api-key": key, "Content-Type": "application/json"}, timeout=120))
-    Path(out_mp3).write_bytes(base64.b64decode(res["audio_base64"]))
-    al = res.get("normalized_alignment") or res["alignment"]
-    words, cur, start, end = [], "", None, 0
-    for ch, s, e in zip(al["characters"], al["character_start_times_seconds"], al["character_end_times_seconds"]):
-        if ch.isspace():
-            if cur:
-                words.append((cur, start, end))
-            cur, start = "", None
-        else:
-            if start is None:
-                start = s
-            cur += ch
-            end = e
-    if cur:
-        words.append((cur, start, end))
-    return words
-
-
-def tts_edge(text, out_mp3, rate="-6%", pitch="-2Hz"):
-    import edge_tts
-    import edge_tts.communicate as c
-    c._SSL_CTX = ssl_ctx()
-
-    async def go():
-        words, audio = [], bytearray()
-        com = edge_tts.Communicate(text, EDGE_VOICE, rate=rate, pitch=pitch, boundary="WordBoundary")
-        async for ch in com.stream():
-            if ch["type"] == "audio":
-                audio.extend(ch["data"])
-            elif ch["type"] == "WordBoundary":
-                s = ch["offset"] / 1e7
-                words.append((ch["text"], s, s + ch["duration"] / 1e7))
-        Path(out_mp3).write_bytes(bytes(audio))
-        return words
-    for attempt in range(4):
-        try:
-            return asyncio.run(go())
-        except Exception as e:
-            if attempt == 3:
-                raise
-            print(f"    Stimme: Netzwerkfehler ({type(e).__name__}), neuer Versuch ...")
-            import time
-            time.sleep(2 ** attempt)
-
-
-def decode(path):
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(SR), "-"],
-                         capture_output=True, check=True).stdout
-    return np.frombuffer(raw, np.float32).copy()
-
-
-def trim_silence(a, words, thresh=0.01):
-    """Schneidet Stille am Anfang/Ende weg und verschiebt die Wortzeiten."""
-    idx = np.where(np.abs(a) > thresh)[0]
-    if len(idx) == 0:
-        return a, words
-    s = max(0, idx[0] - int(0.03 * SR))
-    e = min(len(a), idx[-1] + int(0.08 * SR))
-    off = s / SR
-    return a[s:e], [(w, max(0, ws - off), max(0, we - off)) for w, ws, we in words]
-
-
-def map_word_times(tokens, tts_words, dur):
-    """Ordnet jedem Untertitel-Wort eine Startzeit zu (über Zeichenpositionen)."""
-    tts_chars, tts_pos = [], 0
-    for w, s, e in tts_words:
-        n = len(norm(w))
-        if n:
-            tts_chars.append((tts_pos, tts_pos + n, s, e))
-            tts_pos += n
-    tok_lens = [max(1, len(norm(t["word"]))) for t in tokens]
-    total_tok = sum(tok_lens)
-    if not tts_chars:
-        # gleichmäßig nach Zeichenlänge verteilen
-        acc, times = 0, []
-        for n in tok_lens:
-            times.append(dur * acc / total_tok)
-            acc += n
-        return times
-    scale = tts_pos / total_tok
-    times, acc = [], 0
-    for n in tok_lens:
-        p = acc * scale
-        t = tts_chars[-1][2]
-        for a, b, s, e in tts_chars:
-            if a <= p < b:
-                t = s + (e - s) * (p - a) / max(1, b - a)
-                break
-        times.append(t)
-        acc += n
-    # monoton halten
-    for i in range(1, len(times)):
-        times[i] = max(times[i], times[i - 1] + 0.05)
-    return times
-
-
-# --- Untertitel-Grafiken -------------------------------------------------------
 
 def font(name, size):
-    return ImageFont.truetype(str(FONTS / f"{name}.ttf"), size)
+    return ImageFont.truetype(str(FONTS / f"{name}.ttf"), max(8, int(size)))
 
 
-def chunk_tokens(tokens, max_words=3, max_chars=20):
-    """Gruppiert Wörter in kurze Einblendungen (2–4 Wörter wie im Original)."""
-    chunks, cur = [], []
-    for i, t in enumerate(tokens):
-        if t["style"] == "big":
-            if cur:
-                chunks.append(cur)
-                cur = []
-            # zusammenhängende große Wörter gemeinsam
-            if chunks and chunks[-1] and chunks[-1][-1]["style"] == "big" and chunks[-1][-1].get("_idx") == i - 1:
-                chunks[-1].append({**t, "_idx": i})
-            else:
-                chunks.append([{**t, "_idx": i}])
-            continue
-        cur.append({**t, "_idx": i})
-        text_len = sum(len(x["word"]) + 1 for x in cur)
-        ends = t["word"][-1] in ".,!?:;…"
-        if ends or len(cur) >= max_words or text_len >= max_chars:
-            chunks.append(cur)
+# ---------------------------------------------------------------------------
+# 1) Stimme + Wortzeiten
+# ---------------------------------------------------------------------------
+
+def build_voice(spec, beats, work, use_eleven, key):
+    groups, cur = [], []
+    for i, b in enumerate(beats):
+        cur.append(i)
+        txt = b["text"].rstrip()
+        if (plain(txt).rstrip().endswith((".", "?", "!", "…")) or txt.endswith("]") or "pause" in b
+                or i == len(beats) - 1):
+            groups.append(cur)
             cur = []
-    if cur:
-        chunks.append(cur)
-    # einzelne kurze Wörter am Ende an den vorigen Chunk hängen
-    merged = []
-    for c in chunks:
-        if (merged and len(c) == 1 and c[0]["style"] == "normal" and len(c[0]["word"]) <= 3
-                and merged[-1][-1]["style"] != "big" and merged[-1][-1]["word"][-1] not in ".!?"):
-            merged[-1].extend(c)
+    say_of = lambda i: beats[i].get("say") or plain(beats[i]["text"])  # noqa: E731
+    audio, t = [], 0.0
+    for gi, idxs in enumerate(groups):
+        say = " ".join(say_of(i) for i in idxs)
+        mp3 = work / f"v{gi:02d}.mp3"
+        if use_eleven:
+            prev_t = " ".join(say_of(i) for i in range(max(0, idxs[0] - 2), idxs[0]))
+            next_t = " ".join(say_of(i) for i in range(idxs[-1] + 1, min(len(beats), idxs[-1] + 3)))
+            words = S.tts_eleven(say, prev_t, next_t, key, mp3)
         else:
-            merged.append(c)
-    return merged
+            words = S.tts_edge(say, mp3, rate=spec.get("rate", "-6%"), pitch=spec.get("pitch", "-2Hz"))
+        a, words = S.trim_silence(S.decode(mp3), words)
+        if any(beats[i].get("say") for i in idxs):
+            words = []
+        dv = len(a) / SR
+        last = beats[idxs[-1]]
+        ends_big = last["text"].rstrip().endswith("]")
+        pause = last.get("pause", BLACK_HOLD if ends_big else PAUSE)
+        tokens, owner = [], []
+        for i in idxs:
+            tk = parse_tokens(beats[i]["text"])
+            tokens += tk
+            owner += [i] * len(tk)
+        wt = S.map_word_times(tokens, words, dv)
+        for k, tok in enumerate(tokens):
+            tok["t"] = t + wt[k]
+            nxt = t + (wt[k + 1] if k + 1 < len(tokens) else dv)
+            tok["te"] = max(tok["t"] + 0.08, nxt)
+        first = {}
+        for k, i in enumerate(owner):
+            first.setdefault(i, tokens[k]["t"])
+        for n, i in enumerate(idxs):
+            b = beats[i]
+            b["_tokens"] = [tokens[k] for k in range(len(tokens)) if owner[k] == i]
+            b["_start"] = t if n == 0 else first[i] - 0.06
+            b["_end"] = (t + dv + pause) if n == len(idxs) - 1 else first[idxs[n + 1]] - 0.06
+            b["_black"] = (t + dv + 0.05) if (n == len(idxs) - 1 and ends_big and b.get("black", True)) else None
+        audio += [a, np.zeros(int(pause * SR), np.float32)]
+        t += dv + pause
+        print(f"  Satz {gi + 1}/{len(groups)}: {dv:.1f}s  {say[:70]}")
+    tail = 0.5
+    audio.append(np.zeros(int(tail * SR), np.float32))
+    return np.concatenate(audio), t + tail
 
 
-def draw_line(draw, img, x_center, y, words, fnt, colors, shadow=True):
-    space = fnt.getlength(" ")
-    widths = [fnt.getlength(w) for w in words]
-    total = sum(widths) + space * (len(words) - 1)
-    x = x_center - total / 2
-    if shadow:
-        sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        sd = ImageDraw.Draw(sh)
-        xx = x
-        for w, wd in zip(words, widths):
-            sd.text((xx + 3, y + 5), w, font=fnt, fill=(0, 0, 0, 170), anchor="ls")
-            xx += wd + space
-        sh = sh.filter(ImageFilter.GaussianBlur(9))
-        img.alpha_composite(sh)
-    for w, wd, col in zip(words, widths, colors):
-        draw.text((x, y), w, font=fnt, fill=col + (255,), anchor="ls")
-        x += wd + space
+# ---------------------------------------------------------------------------
+# 2) Hintergrund-Clips
+# ---------------------------------------------------------------------------
 
-
-def render_chunk(chunk, prev_chunk, W, H, path):
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    s = W / 1920 if W > H else W / 1080
-    cy = H * 0.5
-    is_big = chunk[0]["style"] == "big"
-    is_num = all(re.fullmatch(r"[\d.,^%:/+\-x×]+|zu|in|von|1", t["word"]) for t in chunk) and any(
-        re.search(r"\d", t["word"]) for t in chunk)
-    if is_big:
-        words = [t["word"].upper().rstrip(".,!?:;") for t in chunk]
-        f = font("jakarta-extrabold", int(230 * s))
-        while sum(f.getlength(w) for w in words) > W * 0.88 and f.size > 60:
-            f = font("jakarta-extrabold", f.size - 8)
-        if prev_chunk and prev_chunk[0]["style"] != "big":
-            small = font("jakarta-extrabold", int(84 * s))
-            draw_line(d, img, W / 2, cy - f.size * 0.62, [t["word"] for t in prev_chunk], small,
-                      [YELLOW if t["style"] == "hl" else WHITE for t in prev_chunk])
-        draw_line(d, img, W / 2, cy + f.size * 0.42, words, f, [YELLOW] * len(words))
-    elif is_num:
-        f = font("oswald-medium", int(150 * s))
-        draw_line(d, img, W / 2, cy + f.size * 0.35, [t["word"] for t in chunk], f, [YELLOW] * len(chunk))
-    else:
-        f = font("jakarta-extrabold", int(90 * s))
-        words = [t["word"] for t in chunk]
-        cols = [YELLOW if t["style"] == "hl" else WHITE for t in chunk]
-        if sum(f.getlength(w) for w in words) > W * 0.85:   # Hochformat: in zwei Zeilen
-            half = (len(words) + 1) // 2
-            draw_line(d, img, W / 2, cy - f.size * 0.25, words[:half], f, cols[:half])
-            draw_line(d, img, W / 2, cy + f.size * 0.95, words[half:], f, cols[half:])
-        else:
-            draw_line(d, img, W / 2, cy + f.size * 0.35, words, f, cols)
-    img.save(path)
-
-
-def render_bigword(word, W, H, path):
-    """Riesiges, halbtransparentes Wort hinter dem Untertitel (wie "BIG BANG", "WAR")."""
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    f = font("oswald-medium", int(min(W, H * 1.6) * 0.30))
-    while f.getlength(word) > W * 0.92:
-        f = font("oswald-medium", f.size - 10)
-    d.text((W / 2, H * 0.5), word, font=f, fill=(225, 225, 230, 70), anchor="mm")
-    img.save(path)
-
-
-def render_handle(handle, W, H, path):
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    f = font("jakarta-bold", int(28 * (W / 1920 if W > H else W / 1080)))
-    d.text((W * 0.5 + W * 0.17, H * 0.5 + H * 0.06), handle, font=f, fill=(255, 255, 255, 45), anchor="mm")
-    img.save(path)
-
-
-# --- Stock-Clips (Mixkit, kostenlos & ohne Key) ---------------------------------
-
-def mixkit_items(url):
-    """Liest alle Videos (ID, Titel, Beschreibung, Lizenz) aus einer Mixkit-Seite."""
-    key = hashlib.md5(url.encode()).hexdigest()[:12]
-    cf = CACHE / "search" / f"{key}.json"
-    if cf.exists():
-        return json.loads(cf.read_text())
-    try:
-        html = http(url).decode("utf-8", "ignore")
-    except Exception:
-        return []
-    free = {}
-    for block in html.split('{"@type":"VideoObject"')[1:]:
-        vid = re.search(r"videos/(\d+)/\1-\d+\.mp4", block)
-        lic = re.search(r'"copyrightNotice":"([^"]*)"', block)
-        if vid and lic:
-            free[vid.group(1)] = lic.group(1) == "Free"
-    items, seen = [], set()
-    for card in re.split(r'<div class="item-grid-video-player(?=[ "])', html)[1:]:
-        vid = re.search(r'item-id-value="(\d+)"', card)
-        if not vid or vid.group(1) in seen:
-            continue
-        seen.add(vid.group(1))
-        head = card[:200]
-        title = re.search(r'overlay-video-title">\s*(.*?)\s*</span>', card, re.S)
-        desc = re.search(r'overlay-video-description">\s*(.*?)\s*</span>', card, re.S)
-        items.append({"id": vid.group(1),
-                      "text": ((title.group(1) if title else "") + " " + (desc.group(1) if desc else "")).lower(),
-                      "vertical": "--vertical" in head,
-                      "free": free.get(vid.group(1), True)})
-    cf.parent.mkdir(parents=True, exist_ok=True)
-    cf.write_text(json.dumps(items))
-    return items
-
-
-def mixkit_search(query, vertical=False):
-    """Sucht passende Clips. Liefert IDs, die besten zuerst (Titel muss zum Suchbegriff passen)."""
-    q = query.strip().lower()
-    words = q.split()
-    items = []
-    for w in words[:2]:
-        items += mixkit_items(f"https://mixkit.co/free-stock-video/{w}/")
-        items += mixkit_items(f"https://mixkit.co/free-stock-video/{w}/?page=2")
-    items += mixkit_items(f"https://mixkit.co/free-stock-video/discover/?q={urllib.parse.quote_plus(q)}")
-    best = {}
-    for it in items:
-        if re.search(r"green screen|chroma|brainstorm|logo|mockup|template|text space", it["text"]):
-            continue
-        hits = sum(1 for w in words if re.search(r"\b" + re.escape(w), it["text"]))
-        if hits == 0:
-            continue
-        score = hits / len(words) + (0.2 if it["free"] else 0) + (0.3 if it.get("vertical", False) == vertical else 0)
-        best[it["id"]] = max(best.get(it["id"], 0), score)
-    ranked = sorted(best, key=lambda k: -best[k])
-    top = best[ranked[0]] if ranked else 0
-    return [k for k in ranked if best[k] >= top - 0.25]
-
-
-def mixkit_download(vid):
-    path = CACHE / "clips" / f"{vid}.mp4"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        for res in ("720", "360"):
-            try:
-                path.write_bytes(http(f"https://assets.mixkit.co/videos/{vid}/{vid}-{res}.mp4", timeout=180))
-                break
-            except Exception:
-                continue
-    return path if path.exists() and path.stat().st_size > 10000 else None
-
-
-def pick_clip(queries, used, rng, vertical=False):
-    for q in queries:
-        ids = [v for v in mixkit_search(q, vertical) if v not in used][:6]
-        rng.shuffle(ids)
-        for vid in ids[:4]:
-            p = mixkit_download(vid)
-            if p:
-                used.add(vid)
-                return p
-    return None
-
-
-def render_bg(clip, dur, W, H, path, rng, fade_in=False):
-    """Clip zuschneiden, abdunkeln, langsamer Zoom – wie im Original."""
+def render_bg(clip, dur, W, H, path, rng, style):
     if clip is None:
-        run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={FPS}:d={dur:.3f}",
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", str(path)])
+        S.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={FPS}:d={dur:.3f}",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(path)])
         return
-    cd = probe_duration(clip)
+    cd = S.probe_duration(clip)
     start = rng.uniform(0, max(0, cd - dur - 0.2)) if cd > dur + 0.5 else 0
-    zoom_in = rng.random() < 0.6
-    z0, z1 = (1.0, 1.08) if zoom_in else (1.08, 1.0)
+    z0, z1 = (1.0, 1.10) if rng.random() < 0.65 else (1.10, 1.0)
     z = f"({z0}+({z1 - z0})*t/{dur:.3f})"
+    dark = 0.42 if style == "type" else 0.50
+    grade = ("eq=saturation=0.8:contrast=1.08" if style == "type"
+             else "eq=saturation=0.55:contrast=1.15:gamma=0.95,colorbalance=rs=0.04:bs=-0.03:rh=0.03")
     vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
           f"scale=w='trunc({W}*{z}/2)*2':h='trunc({H}*{z}/2)*2':eval=frame,crop={W}:{H},"
-          f"setsar=1,fps={FPS},eq=saturation=0.85:contrast=1.05,"
-          f"colorchannelmixer=rr={1 - DARKEN}:gg={1 - DARKEN}:bb={1 - DARKEN},vignette=PI/4.5")
-    if fade_in:
-        vf += ",fade=t=in:st=0:d=0.35"
+          f"setsar=1,fps={FPS},{grade},"
+          f"colorchannelmixer=rr={1 - dark}:gg={1 - dark}:bb={1 - dark},vignette=PI/4")
     loop = ["-stream_loop", "-1"] if cd < dur + start else []
-    run(["ffmpeg", "-y", "-v", "error", *loop, "-ss", f"{start:.2f}", "-i", str(clip), "-t", f"{dur:.3f}",
-         "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", str(path)])
+    S.run(["ffmpeg", "-y", "-v", "error", *loop, "-ss", f"{start:.2f}", "-i", str(clip), "-t", f"{dur:.3f}",
+           "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(path)])
 
 
-# --- Hauptprogramm --------------------------------------------------------------
+def build_background(beats, total, W, H, work, rng, style):
+    groups = []
+    for b in beats:
+        if groups and b.get("same_clip"):
+            groups[-1]["end"] = b["_end"]
+        else:
+            groups.append({"q": b.get("clip", "dark sky"), "start": b["_start"], "end": b["_end"]})
+    groups[0]["start"] = 0.0
+    groups[-1]["end"] = total
+    used, files, cuts = set(), [], []
+    for gi, g in enumerate(groups):
+        f0, f1 = round(g["start"] * FPS), round(g["end"] * FPS)
+        dur = (f1 - f0) / FPS
+        cuts.append(f0 / FPS)
+        queries = ([g["q"]] if isinstance(g["q"], str) else list(g["q"])) + ["night sky stars", "dark clouds"]
+        clip = S.pick_clip(queries, used, rng, vertical=H > W)
+        f = work / f"bg{gi:02d}.mp4"
+        render_bg(clip, dur, W, H, f, rng, style)
+        files.append(f)
+        print(f"  Clip {gi + 1}/{len(groups)}: {queries[0]} -> {clip.name if clip else 'schwarz'}")
+    lst = work / "list.txt"
+    lst.write_text("".join(f"file '{f}'\n" for f in files))
+    bg = work / "bg.mp4"
+    S.run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(bg)])
+    return bg, cuts
+
+
+# ---------------------------------------------------------------------------
+# 3) Text-Layout
+# ---------------------------------------------------------------------------
+
+class Item:
+    """Ein Wort an fester Position."""
+    __slots__ = ("text", "x", "y", "font", "color", "t", "te", "big")
+
+    def __init__(self, text, x, y, fnt, color, t, te, big=False):
+        self.text, self.x, self.y, self.font, self.color = text, x, y, fnt, color
+        self.t, self.te, self.big = t, te, big
+
+
+def is_num(w):
+    return bool(re.search(r"\d", w)) and len(re.sub(r"[\d.,%^:/+\-x×]", "", w)) <= 1
+
+
+def make_blocks_type(beats, W, H):
+    """Text-Blöcke im Tipp-Stil: bis zu ~3 Zeilen, Buchstabe für Buchstabe aufgebaut."""
+    s = W / 1920 if W > H else W / 1080
+    f_norm = font("jakarta-extrabold", 82 * s)
+    f_big = font("jakarta-extrabold", 200 * s)
+    f_num = font("oswald-medium", 118 * s)
+    maxw = W * (0.62 if W > H else 0.86)
+    anchors = [0.5, 0.42, 0.5, 0.58, 0.36]
+    blocks = []
+    for bi, b in enumerate(beats):
+        toks = b["_tokens"]
+        groups, cur = [], []
+        for k, tok in enumerate(toks):
+            cur.append(tok)
+            words = len([x for x in cur if x["style"] != "big"])
+            end_sent = tok["word"][-1:] in ".?!…" and words >= 2
+            end_comma = tok["word"][-1:] in ",:;" and words >= 5
+            if tok.get("brk") or end_sent or end_comma or words >= 8:
+                if k + 1 < len(toks) and toks[k + 1]["style"] == "big" and not tok.get("brk"):
+                    continue
+                groups.append(cur)
+                cur = []
+        if cur:
+            if groups and len(cur) == 1 and cur[0]["style"] != "big" and len(groups[-1]) < 6:
+                groups[-1] += cur
+            else:
+                groups.append(cur)
+        ay = anchors[bi % len(anchors)] if W > H else 0.45
+        for gi, g in enumerate(groups):
+            lines, line, lw = [], [], 0
+            for tok in g:
+                if tok["style"] == "big":
+                    if line:
+                        lines.append(line)
+                    lines.append([tok])
+                    line, lw = [], 0
+                    continue
+                fnt = f_num if is_num(tok["word"]) else f_norm
+                w = fnt.getlength(tok["word"])
+                sp = fnt.getlength(" ")
+                if line and lw + sp + w > maxw:
+                    lines.append(line)
+                    line, lw = [], 0
+                line.append(tok)
+                lw += (sp if lw else 0) + w
+            if line:
+                lines.append(line)
+            metrics = []
+            for ln in lines:
+                if ln[0]["style"] == "big":
+                    fb = f_big
+                    while fb.getlength(ln[0]["word"].upper()) > W * 0.86 and fb.size > 60:
+                        fb = font("jakarta-extrabold", fb.size - 10)
+                    metrics.append((ln, fb, fb.size * 0.92))
+                else:
+                    hmax = max((f_num if is_num(t["word"]) else f_norm).size for t in ln)
+                    metrics.append((ln, None, hmax * 1.08))
+            total_h = sum(m[2] for m in metrics)
+            y = H * ay - total_h / 2
+            start = g[0]["t"] - 0.02
+            end = groups[gi + 1][0]["t"] - 0.04 if gi + 1 < len(groups) else b["_end"]
+            items = []
+            for ln, fb, lh in metrics:
+                y += lh
+                if fb is not None:
+                    tok = ln[0]
+                    txt = tok["word"].upper().rstrip(".,!?:;")
+                    items.append(Item(txt, W / 2 - fb.getlength(txt) / 2, y - lh * 0.08, fb, YELLOW,
+                                      tok["t"], tok["te"], big=True))
+                    continue
+                fonts_ = [f_num if is_num(t["word"]) else f_norm for t in ln]
+                widths = [f.getlength(t["word"]) for f, t in zip(fonts_, ln)]
+                sp = f_norm.getlength(" ")
+                x = W / 2 - (sum(widths) + sp * (len(ln) - 1)) / 2
+                for f, t, w in zip(fonts_, ln, widths):
+                    col = YELLOW if (t["style"] == "hl" or is_num(t["word"])) else WHITE
+                    items.append(Item(t["word"], x, y - lh * 0.22, f, col, t["t"], t["te"]))
+                    x += w + sp
+            blocks.append({"start": start, "end": end, "items": items, "black": b.get("_black")})
+    return blocks
+
+
+def make_blocks_glitch(beats, W, H):
+    """Glitch-Stil: kleine gelbe Untertitel unten, ganze Phrase auf einmal."""
+    s = W / 1920 if W > H else W / 1080
+    f_sub = font("oswald-medium", 50 * s)
+    blocks = []
+    for b in beats:
+        groups, cur = [], []
+        for tok in b["_tokens"]:
+            cur.append(tok)
+            if tok.get("brk") or tok["word"][-1:] in ".?!…,:" or len(cur) >= 5:
+                groups.append(cur)
+                cur = []
+        if cur:
+            groups.append(cur)
+        for gi, g in enumerate(groups):
+            txt = " ".join(t["word"] for t in g).rstrip(".,")
+            start = g[0]["t"] - 0.03
+            end = groups[gi + 1][0]["t"] - 0.03 if gi + 1 < len(groups) else b["_end"]
+            x = W / 2 - f_sub.getlength(txt) / 2
+            y = H * (0.925 if W > H else 0.80)
+            blocks.append({"start": start, "end": end, "black": b.get("_black"), "instant": True,
+                           "items": [Item(txt, x, y, f_sub, YELLOW, start, start + 0.01)]})
+    return blocks
+
+
+def make_bigwords(beats):
+    """Riesige Hintergrundwörter ({WORT} im Text oder Feld "bg")."""
+    out = []
+    for b in beats:
+        words = []
+        if b.get("bg"):
+            words.append((b["bg"], b["_start"] + 0.05))
+        run_, t0 = [], None
+        for tok in b["_tokens"]:
+            if tok["style"] == "bgw":
+                run_.append(tok["word"].rstrip(".,!?:;"))
+                t0 = t0 if t0 is not None else tok["t"]
+            elif run_:
+                words.append((" ".join(run_), t0))
+                run_, t0 = [], None
+        if run_:
+            words.append((" ".join(run_), t0))
+        for w, t0 in words:
+            out.append({"text": w, "start": t0, "end": b["_end"]})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 4) Text-Ebenen zeichnen
+# ---------------------------------------------------------------------------
+
+def visible_chars(it, t, instant=False):
+    if instant or it.big:
+        return len(it.text) if t >= it.t else 0
+    if t < it.t:
+        return 0
+    dur = min(max(0.045 * len(it.text), 0.10), max(0.10, (it.te - it.t) * 0.9), 0.45)
+    return min(len(it.text), int(len(it.text) * (t - it.t) / dur) + 1)
+
+
+def draw_items(items, counts, W, H):
+    vis = [(it, n) for it, n in zip(items, counts) if n > 0]
+    if not vis:
+        return None
+    pad = 40
+    x0 = int(max(0, min(it.x for it, _ in vis) - pad))
+    x1 = int(min(W, max(it.x + it.font.getlength(it.text) for it, _ in vis) + pad))
+    y0 = int(max(0, min(it.y - it.font.size for it, _ in vis) - pad))
+    y1 = int(min(H, max(it.y + it.font.size * 0.3 for it, _ in vis) + pad))
+    img = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(sh)
+    for it, n in vis:
+        sd.text((it.x - x0 + 2, it.y - y0 + 4), it.text[:n], font=it.font, fill=(0, 0, 0, 150), anchor="ls")
+    img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(10)))
+    d = ImageDraw.Draw(img)
+    for it, n in vis:
+        d.text((it.x - x0, it.y - y0), it.text[:n], font=it.font, fill=it.color + (255,), anchor="ls")
+    return x0, y0, np.asarray(img)
+
+
+def composite(frame, layer, scale=1.0):
+    if layer is None:
+        return
+    x0, y0, arr = layer
+    if scale != 1.0:
+        h, w = arr.shape[:2]
+        nw, nh = int(w * scale), int(h * scale)
+        arr = cv2.resize(arr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        x0 -= (nw - w) // 2
+        y0 -= (nh - h) // 2
+    H, W = frame.shape[:2]
+    h, w = arr.shape[:2]
+    ax0, ay0 = max(0, x0), max(0, y0)
+    ax1, ay1 = min(W, x0 + w), min(H, y0 + h)
+    if ax1 <= ax0 or ay1 <= ay0:
+        return
+    src = arr[ay0 - y0:ay1 - y0, ax0 - x0:ax1 - x0].astype(np.float32)
+    a = src[..., 3:4] / 255.0
+    dst = frame[ay0:ay1, ax0:ax1].astype(np.float32)
+    frame[ay0:ay1, ax0:ax1] = (dst * (1 - a) + src[..., :3] * a).astype(np.uint8)
+
+
+def render_bigword(text, n, W, H, style):
+    txt = text[:n]
+    if not txt:
+        return None
+    s = W / 1920 if W > H else W / 1080 * 0.75
+    f = font("oswald-medium", (430 if style == "glitch" else 360) * s)
+    while f.getlength(text) > W * 0.92 and f.size > 80:
+        f = font("oswald-medium", f.size - 10)
+    full_w = f.getlength(text)
+    img = Image.new("RGBA", (int(full_w) + 40, int(f.size * 1.3)), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    col = (214, 216, 226, 225) if style == "glitch" else (230, 230, 236, 80)
+    d.text((20, f.size * 1.05), txt, font=f, fill=col, anchor="ls")
+    return int(W / 2 - full_w / 2 - 20), int(H / 2 - f.size * 0.7), np.asarray(img)
+
+
+# ---------------------------------------------------------------------------
+# 5) Effekte
+# ---------------------------------------------------------------------------
+
+def glitch(frame, rng, strength=1.0):
+    H, W = frame.shape[:2]
+    out = frame.copy()
+    for _ in range(rng.randint(2, 6)):                      # verschobene Bildstreifen
+        y = rng.randint(0, H - 10)
+        h = rng.randint(6, int(70 * strength) + 8)
+        out[y:y + h] = np.roll(out[y:y + h], int(rng.uniform(-90, 90) * strength), axis=1)
+    k = int(rng.uniform(5, 16) * strength)                  # RGB-Versatz
+    out[..., 0] = np.roll(out[..., 0], k, axis=1)
+    out[..., 2] = np.roll(out[..., 2], -k, axis=1)
+    for _ in range(rng.randint(1, 3)):                      # helle Linien
+        y = rng.randint(0, H - 6)
+        x0 = rng.randint(0, W // 2)
+        x1 = rng.randint(x0 + W // 6, W)
+        col = np.array(rng.choice([(255, 230, 255), (230, 240, 255), (255, 255, 255), (200, 120, 255)]), np.float32)
+        hh = rng.randint(2, 7)
+        band = out[y:y + hh, x0:x1].astype(np.float32)
+        out[y:y + hh, x0:x1] = np.clip(band * 0.35 + col * 0.65, 0, 255).astype(np.uint8)
+    if rng.random() < 0.35:
+        out = np.clip(out.astype(np.int16) + rng.randint(15, 45), 0, 255).astype(np.uint8)
+    return out
+
+
+class Grain:
+    def __init__(self, W, H, amount, seed=1):
+        r = np.random.default_rng(seed)
+        self.frames = []
+        for _ in range(6):
+            n = r.normal(0, amount, (H // 2, W // 2)).astype(np.float32)
+            n = cv2.resize(n, (W, H), interpolation=cv2.INTER_LINEAR)
+            self.frames.append(n[..., None].astype(np.int16))
+        self.i = 0
+
+    def apply(self, frame):
+        self.i = (self.i + 1) % len(self.frames)
+        return np.clip(frame.astype(np.int16) + self.frames[self.i], 0, 255).astype(np.uint8)
+
+
+def punch(frame, scale):
+    H, W = frame.shape[:2]
+    big = cv2.resize(frame, (int(W * scale), int(H * scale)), interpolation=cv2.INTER_LINEAR)
+    y, x = (big.shape[0] - H) // 2, (big.shape[1] - W) // 2
+    return big[y:y + H, x:x + W]
+
+
+# ---------------------------------------------------------------------------
+# 6) Sound-Effekte (selbst erzeugt)
+# ---------------------------------------------------------------------------
+
+def sfx_boom():
+    t = np.arange(int(1.2 * SR)) / SR
+    f = 62 * np.exp(-t * 1.5) + 34
+    sub = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 3.2)
+    noise = np.random.default_rng(3).normal(0, 1, len(t)) * np.exp(-t * 28) * 0.25
+    noise = np.convolve(noise, np.ones(30) / 30, mode="same")
+    return (sub * 0.9 + noise).astype(np.float32)
+
+
+def sfx_glitch(rng):
+    n = int(rng.uniform(0.08, 0.16) * SR)
+    x = np.random.default_rng(rng.randint(0, 10 ** 6)).normal(0, 1, n)
+    step = rng.randint(30, 120)
+    x = np.repeat(x[::step], step)[:n]
+    x = x * (np.sin(np.arange(n) / SR * 2 * np.pi * rng.uniform(40, 120)) > 0)
+    env = np.minimum(1, np.arange(n) / 200) * np.minimum(1, (n - np.arange(n)) / 400)
+    return (x * env * 0.5).astype(np.float32)
+
+
+def sfx_whoosh():
+    n = int(0.55 * SR)
+    x = np.random.default_rng(9).normal(0, 1, n)
+    out = np.zeros(n, np.float32)
+    lo = np.convolve(x, np.ones(40) / 40, mode="same")      # dunkles Rauschen
+    hi = np.convolve(x, np.ones(6) / 6, mode="same")         # helles Rauschen
+    mixk = np.linspace(0, 1, n)
+    out = lo * (1 - mixk) + hi * mixk * 0.5
+    env = np.sin(np.linspace(0, np.pi, n)) ** 2
+    return (out * env * 3.0).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Hauptprogramm
+# ---------------------------------------------------------------------------
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("script")
     ap.add_argument("--vertical", action="store_true", help="9:16 statt 16:9")
-    ap.add_argument("--out", help="Ausgabedatei")
+    ap.add_argument("--out")
     ap.add_argument("--voice", choices=["auto", "eleven", "edge"], default="auto")
+    ap.add_argument("--preview", action="store_true", help="schnell, halbe Auflösung")
     args = ap.parse_args()
 
     spec = json.loads(Path(args.script).read_text())
     name = Path(args.script).stem
-    W, H = (1080, 1920) if args.vertical or spec.get("vertical") else (1920, 1080)
-    out = Path(args.out or ROOT / "videos" / f"{name}{'_9x16' if H > W else ''}.mp4")
+    style = spec.get("style", "type")
+    vertical = args.vertical or spec.get("vertical")
+    W, H = (1080, 1920) if vertical else (1920, 1080)
+    if args.preview:
+        W, H = W // 2, H // 2
+    out = Path(args.out or ROOT / "videos" /
+               f"{name}{'_9x16' if vertical else ''}{'_preview' if args.preview else ''}.mp4")
     out.parent.mkdir(parents=True, exist_ok=True)
     work = CACHE / "work" / name
     shutil.rmtree(work, ignore_errors=True)
@@ -452,140 +522,131 @@ def main():
     key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not key and (ROOT / ".elevenlabs_key").exists():
         key = (ROOT / ".elevenlabs_key").read_text().strip()
-    use_eleven = args.voice == "eleven" or (args.voice == "auto" and key)
-    print(f"Stimme: {'ElevenLabs Brian' if use_eleven else 'Fallback ' + EDGE_VOICE}")
+    use_eleven = args.voice == "eleven" or (args.voice == "auto" and bool(key))
+    print(f"Stimme: {'ElevenLabs' if use_eleven else 'Fallback ' + S.EDGE_VOICE}"
+          f" | Clips: {'Pexels + Mixkit' if os.environ.get('PEXELS_API_KEY') else 'Mixkit'} | Stil: {style}")
 
     beats = spec["beats"]
-    voice = []
-    captions = []      # (start, end, chunk, prev_chunk)
-    # Beats zu ganzen Sätzen zusammenfassen: endet ein Beat nicht mit . ? ! …,
-    # wird er zusammen mit dem nächsten gesprochen (natürliche Betonung).
-    groups_u, cur = [], []
-    for i, b in enumerate(beats):
-        cur.append(i)
-        txt = b["text"].rstrip()
-        if (plain(txt).endswith((".", "?", "!", "…")) or txt.endswith("]") or "pause" in b
-                or i == len(beats) - 1):
-            groups_u.append(cur)
-            cur = []
-    timeline = [None] * len(beats)
-    t = 0.0
-    for gi, idxs in enumerate(groups_u):
-        say = " ".join(beats[i].get("say") or plain(beats[i]["text"]) for i in idxs)
-        mp3 = work / f"v{gi:02d}.mp3"
-        if use_eleven:
-            prev_t = " ".join(beats[i].get("say") or plain(beats[i]["text"]) for i in range(max(0, idxs[0] - 2), idxs[0]))
-            next_t = " ".join(beats[i].get("say") or plain(beats[i]["text"]) for i in range(idxs[-1] + 1, min(len(beats), idxs[-1] + 3)))
-            words = tts_eleven(say, prev_t, next_t, key, mp3)
+    voice, total = build_voice(spec, beats, work, use_eleven, key)
+    bg, cuts = build_background(beats, total, W, H, work, rng, style)
+
+    blocks = make_blocks_glitch(beats, W, H) if style == "glitch" else make_blocks_type(beats, W, H)
+    bigwords = make_bigwords(beats)
+    blacks = [(b["_black"], total if b is beats[-1] else b["_end"]) for b in beats if b.get("_black")]
+    for bl in blocks:
+        if bl["end"] >= beats[-1]["_end"] - 0.01:
+            bl["end"] = total
+
+    gl_events = []
+    if style == "glitch":
+        for c in cuts[1:]:
+            gl_events.append((c - 0.05, c + rng.uniform(0.12, 0.22)))
+        for bw in bigwords:
+            gl_events.append((bw["start"], bw["start"] + 0.12))
+        t = 1.0
+        while t < total:
+            t += rng.uniform(1.6, 3.8)
+            gl_events.append((t, t + rng.uniform(0.06, 0.2)))
+    big_hits = sorted({round(it.t, 3) for bl in blocks for it in bl["items"] if it.big})
+
+    # --- Audio: Stimme + Musik + Effekte
+    sfx = np.zeros(int((total + 2) * SR), np.float32)
+
+    def add(sig, at, vol):
+        i = int(at * SR)
+        j = min(len(sfx), i + len(sig))
+        if 0 <= i < j:
+            sfx[i:j] += sig[:j - i] * vol
+    boom = sfx_boom()
+    for t in big_hits:
+        add(boom, t, spec.get("boom_volume", 0.5))
+    if style == "glitch":
+        for a, _ in gl_events:
+            add(sfx_glitch(rng), a, 0.09)
+        wh = sfx_whoosh()
+        for bw in bigwords:
+            add(wh, bw["start"] - 0.25, 0.22)
+    sfx = sfx[:int(total * SR)]
+    vpath, spath = work / "voice.f32", work / "sfx.f32"
+    voice.astype(np.float32).tofile(vpath)
+    sfx.tofile(spath)
+    mix = work / "mix.wav"
+    mvol = spec.get("music_volume", 0.24)
+    S.run(["ffmpeg", "-y", "-v", "error",
+           "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(vpath),
+           "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(spath),
+           "-stream_loop", "-1", "-i", str(spec.get("music", MUSIC)),
+           "-filter_complex",
+           f"[0:a]loudnorm=I=-15:TP=-1.5:LRA=11,aresample={SR},aformat=channel_layouts=stereo[vo];"
+           f"[1:a]aformat=channel_layouts=stereo[fx];"
+           f"[2:a]atrim=0:{total:.3f},volume={mvol},afade=t=out:st={total - 1.8:.3f}:d=1.8,"
+           f"aformat=channel_layouts=stereo[mu];"
+           f"[vo][fx][mu]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.95[a]",
+           "-map", "[a]", "-t", f"{total:.3f}", str(mix)])
+
+    # --- Video Bild für Bild
+    print("Rendere Bilder ...")
+    nframes = int(round(total * FPS))
+    reader = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(bg), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                              stdout=subprocess.PIPE)
+    writer = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                               "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-i", str(mix),
+                               "-c:v", "libx264", "-preset", "veryfast" if args.preview else "medium",
+                               "-crf", "21", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                               "-shortest", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
+    grain = Grain(W, H, 13 if style == "glitch" else 6)
+    cache, bw_cache = {}, {}
+    fsize = W * H * 3
+    last = np.zeros((H, W, 3), np.uint8)
+    for fi in range(nframes):
+        t = fi / FPS
+        raw = reader.stdout.read(fsize)
+        frame = np.frombuffer(raw, np.uint8).reshape(H, W, 3).copy() if len(raw) == fsize else last.copy()
+        last = frame
+        black = any(a <= t < e for a, e in blacks)
+        if black:
+            frame = np.zeros_like(frame)
         else:
-            words = tts_edge(say, mp3, rate=spec.get("rate", "-6%"), pitch=spec.get("pitch", "-2Hz"))
-        a, words = trim_silence(decode(mp3), words)
-        if any(beats[i].get("say") for i in idxs):
-            words = []     # abweichender Sprechtext: Zeiten nach Länge verteilen
-        dur_voice = len(a) / SR
-        pause = beats[idxs[-1]].get("pause", PAUSE)
-        seg = dur_voice + pause
-        tokens, owner = [], []
-        for i in idxs:
-            tk = parse_tokens(beats[i]["text"])
-            tokens += tk
-            owner += [i] * len(tk)
-        wt = map_word_times(tokens, words, dur_voice)
-        # Schnittpunkte zwischen den Beats dieses Satzes: kurz vor dem ersten Wort des nächsten Beats
-        bstart = {}
-        for k, i in enumerate(owner):
-            bstart.setdefault(i, wt[k])
-        for n, i in enumerate(idxs):
-            s0 = 0.0 if n == 0 else max(0.0, bstart[i] - 0.08)
-            s1 = seg if n == len(idxs) - 1 else max(0.0, bstart[idxs[n + 1]] - 0.08)
-            timeline[i] = (t + s0, s1 - s0)
-        for i in idxs:
-            sub = [tokens[k] for k in range(len(tokens)) if owner[k] == i]
-            subt = [wt[k] for k in range(len(tokens)) if owner[k] == i]
-            for k, tok in enumerate(sub):
-                tok["_t"] = subt[k]
-            chunks = chunk_tokens(sub)
-            for j, c in enumerate(chunks):
-                cs = t + sub[c[0]["_idx"]]["_t"]
-                if j + 1 < len(chunks):
-                    ce = t + sub[chunks[j + 1][0]["_idx"]]["_t"]
-                else:
-                    ce = timeline[i][0] + timeline[i][1]
-                captions.append([cs, ce, c, chunks[j - 1] if j > 0 else None])
-        voice.append(a)
-        voice.append(np.zeros(int(pause * SR), np.float32))
-        t += seg
-        print(f"  Satz {gi + 1}/{len(groups_u)}: {dur_voice:.1f}s  {say[:60]}")
-    total = t + 0.6
-    voice.append(np.zeros(int(0.6 * SR), np.float32))
-    vwav = work / "voice.f32"
-    np.concatenate(voice).astype(np.float32).tofile(vwav)
-
-    # Hintergrund pro Satz (aufeinanderfolgende Sätze mit gleichem Clip-Begriff teilen sich den Clip)
-    used = set()
-    groups = []
-    for i, b in enumerate(beats):
-        q = b.get("clip", "dark sky")
-        st, du = timeline[i]
-        if groups and b.get("same_clip"):
-            groups[-1]["end"] = st + du
-        else:
-            groups.append({"q": q, "start": st, "end": st + du, "fade": b.get("fade", False)})
-    groups[-1]["end"] = total
-    for g in groups:   # auf ganze Frames runden, damit Bild und Ton synchron bleiben
-        g["dur"] = (round(g["end"] * FPS) - round(g["start"] * FPS)) / FPS
-    seg_files = []
-    for gi, g in enumerate(groups):
-        queries = [g["q"]] if isinstance(g["q"], str) else g["q"]
-        queries = queries + ["night sky stars", "dark clouds"]
-        clip = pick_clip(queries, used, rng, vertical=H > W)
-        f = work / f"bg{gi:02d}.mp4"
-        render_bg(clip, g["dur"], W, H, f, rng, fade_in=g["fade"] or gi == 0)
-        seg_files.append(f)
-        print(f"  Clip {gi + 1}/{len(groups)}: {g['q']} -> {clip.name if clip else 'schwarz'}")
-    lst = work / "list.txt"
-    lst.write_text("".join(f"file '{f}'\n" for f in seg_files))
-    bg = work / "bg.mp4"
-    run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(bg)])
-
-    # Overlays: Riesenwörter (pro Satz) + Untertitel (pro Chunk)
-    overlays = []
-    for i, b in enumerate(beats):
-        if b.get("bg"):
-            p = work / f"big{i:02d}.png"
-            render_bigword(b["bg"], W, H, p)
-            overlays.append((timeline[i][0], timeline[i][0] + timeline[i][1], p, 0.25))
-    for k, (s, e, c, prev) in enumerate(captions):
-        p = work / f"cap{k:03d}.png"
-        render_chunk(c, prev, W, H, p)
-        overlays.append((s, e, p, 0.12))
-    if spec.get("handle"):
-        p = work / "handle.png"
-        render_handle(spec["handle"], W, H, p)
-        overlays.append((0, total, p, 0))
-
-    inputs = ["-i", str(bg), "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(vwav),
-              "-stream_loop", "-1", "-i", str(spec.get("music", MUSIC))]
-    fc, last = [], "[0:v]"
-    for n, (s, e, p, fd) in enumerate(overlays):
-        inputs += ["-loop", "1", "-t", f"{e - s:.3f}", "-i", str(p)]
-        idx = n + 3
-        fade = f",fade=t=in:st=0:d={fd}:alpha=1" if fd else ""
-        fc.append(f"[{idx}:v]format=rgba{fade},setpts=PTS+{s:.3f}/TB[o{n}]")
-        fc.append(f"{last}[o{n}]overlay=0:0:eof_action=pass[v{n}]")
-        last = f"[v{n}]"
-    fc.append(f"{last}format=yuv420p[vout]")
-    mvol = spec.get("music_volume", 0.22)
-    fc.append(f"[1:a]loudnorm=I=-15:TP=-1.5:LRA=11,aresample={SR}[vo]")
-    fc.append(f"[2:a]atrim=0:{total:.3f},volume={mvol},afade=t=out:st={total - 1.8:.3f}:d=1.8[mu]")
-    fc.append("[vo][mu]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[aout]")
-    script = work / "filter.txt"
-    script.write_text(";\n".join(fc))
-    print("Rendere Endvideo ...")
-    run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex_script", str(script),
-         "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}", "-r", str(FPS),
-         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)])
+            sc = 1.0
+            for bt in big_hits:                               # Punch-Zoom bei großen Wörtern
+                if 0 <= t - bt < 0.35:
+                    sc = max(sc, 1.0 + 0.05 * (1 - (t - bt) / 0.35) ** 2)
+            if sc > 1.001:
+                frame = punch(frame, sc)
+            for bi, bw in enumerate(bigwords):                # riesige Hintergrundwörter
+                if bw["start"] <= t < bw["end"]:
+                    n = min(len(bw["text"]), int((t - bw["start"]) / 0.09) + 1)
+                    k = (bi, n)
+                    if k not in bw_cache:
+                        bw_cache[k] = render_bigword(bw["text"], n, W, H, style)
+                    composite(frame, bw_cache[k])
+        for bi, bl in enumerate(blocks):                      # Text
+            if not (bl["start"] <= t < bl["end"]):
+                continue
+            items = bl["items"]
+            if black and bl.get("black") and t >= bl["black"]:
+                items = [it for it in items if it.big] or items
+            counts = tuple(visible_chars(it, t, bl.get("instant")) for it in items)
+            k = (bi, len(items), counts)
+            if k not in cache:
+                if len(cache) > 300:
+                    cache.clear()
+                cache[k] = draw_items(items, counts, W, H)
+            composite(frame, cache[k])
+        if style == "glitch":                                 # Film-Look + Glitches
+            fl = 1.0 + 0.035 * np.sin(t * 13.0) * np.sin(t * 3.1)
+            frame = np.clip(frame.astype(np.float32) * fl, 0, 255).astype(np.uint8)
+            for a, e in gl_events:
+                if a <= t < e:
+                    frame = glitch(frame, rng, 1.0 if W >= 1280 else 0.5)
+                    break
+        frame = grain.apply(frame)
+        writer.stdin.write(frame.tobytes())
+        if fi % (FPS * 10) == 0:
+            print(f"  {t:5.1f}s / {total:.1f}s")
+    writer.stdin.close()
+    writer.wait()
+    reader.kill()
     print(f"Fertig: {out}  ({total:.1f}s)")
 
 

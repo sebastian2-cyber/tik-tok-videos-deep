@@ -1,0 +1,24 @@
+{
+  "title": "Du bist Sternenstaub",
+  "caption": "Du bist älter als die Erde. ✨ #universum #sterne #wissen #physik #deep #fyp",
+  "style": "type",
+  "beats": [
+    {"text": "Was wäre, wenn ich dir sage, dass du *älter* bist als die Erde?", "clip": ["earth from space", "planet earth", "earth"]},
+    {"text": "Nicht du selbst. / Aber fast alles, woraus du *bestehst.*", "clip": ["galaxy", "nebula", "space"]},
+    {"text": "Das *Eisen* in deinem Blut.", "clip": ["blood", "red liquid"]},
+    {"text": "Das *Kalzium* in deinen Knochen.", "clip": ["x-ray", "skeleton"]},
+    {"text": "Der *Sauerstoff* in deiner Lunge.", "clip": ["breathing", "woman breathing"]},
+    {"text": "Nichts davon ist auf der Erde entstanden.", "clip": ["planet", "earth"]},
+    {"text": "Es wurde vor *Milliarden Jahren* / im Inneren von Sternen geschmiedet.", "clip": ["sun", "solar"]},
+    {"text": "Bei über *100 Millionen Grad.*", "say": "Bei über hundert Millionen Grad.", "clip": ["fire", "flames"], "bg": "100.000.000°"},
+    {"text": "Und als diese Sterne starben, / explodierten sie als [SUPERNOVA]", "clip": ["explosion space", "supernova", "explosion"]},
+    {"text": "Ihr Staub trieb durch das All. / Millionen Jahre lang.", "clip": ["nebula", "cosmic dust", "stars"]},
+    {"text": "Bis er sich zu einer neuen Sonne formte. / Zu einem Planeten.", "clip": ["sunrise", "sun rising"]},
+    {"text": "Und irgendwann…", "clip": ["ocean", "waves"], "pause": 0.3},
+    {"text": "zu [DIR]", "clip": ["silhouette", "person silhouette"]},
+    {"text": "Die Atome in deiner Hand / stammen vielleicht von *verschiedenen Sternen.*", "clip": ["hand", "hand light"]},
+    {"text": "Du bist ein Teil des Universums, / der gelernt hat, sich selbst zu *betrachten.*", "clip": ["night sky person", "stargazing", "milky way"]},
+    {"text": "Also wenn du dich das nächste Mal *klein* fühlst…", "clip": ["lonely", "alone"], "pause": 0.4},
+    {"text": "denk daran: / In dir brennt noch immer das Licht von [STERNEN]", "clip": ["stars", "starry sky", "night sky"]}
+  ]
+}
