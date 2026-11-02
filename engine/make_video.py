@@ -162,7 +162,7 @@ def render_bg(clip, dur, W, H, path, rng, style):
            "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(path)])
 
 
-def build_background(beats, total, W, H, work, rng, style):
+def build_background(beats, total, W, H, work, rng, style, max_shot=2.8):
     groups = []
     for b in beats:
         if groups and b.get("same_clip"):
@@ -171,6 +171,16 @@ def build_background(beats, total, W, H, work, rng, style):
             groups.append({"q": b.get("clip", "dark sky"), "start": b["_start"], "end": b["_end"]})
     groups[0]["start"] = 0.0
     groups[-1]["end"] = total
+    # Lange Einstellungen in mehrere Clips teilen (schnellere Schnitte = mehr Spannung)
+    split = []
+    for g in groups:
+        d = g["end"] - g["start"]
+        n = max(1, int(d / max_shot + 0.35)) if not g.get("keep") else 1
+        qs = [g["q"]] if isinstance(g["q"], str) else list(g["q"])
+        for k in range(n):
+            q = qs[k % len(qs):] + qs[:k % len(qs)]
+            split.append({"q": q, "start": g["start"] + d * k / n, "end": g["start"] + d * (k + 1) / n})
+    groups = split
     used, files, cuts = set(), [], []
     for gi, g in enumerate(groups):
         f0, f1 = round(g["start"] * FPS), round(g["end"] * FPS)
@@ -235,6 +245,11 @@ def make_blocks_type(beats, W, H):
                 groups.append(cur)
         ay = anchors[bi % len(anchors)] if W > H else 0.45
         for gi, g in enumerate(groups):
+            # ausgewogene Zeilen: Breite so wählen, dass alle Zeilen ähnlich lang sind
+            normal = [t for t in g if t["style"] != "big"]
+            tot = sum((f_num if is_num(t["word"]) else f_norm).getlength(t["word"] + " ") for t in normal)
+            nl = max(1, int(np.ceil(tot / maxw)))
+            lim = min(maxw, tot / nl * 1.3 + 30)
             lines, line, lw = [], [], 0
             for tok in g:
                 if tok["style"] == "big":
@@ -246,7 +261,7 @@ def make_blocks_type(beats, W, H):
                 fnt = f_num if is_num(tok["word"]) else f_norm
                 w = fnt.getlength(tok["word"])
                 sp = fnt.getlength(" ")
-                if line and lw + sp + w > maxw:
+                if line and lw + sp + w > lim:
                     lines.append(line)
                     line, lw = [], 0
                 line.append(tok)
@@ -363,6 +378,15 @@ def draw_items(items, counts, W, H):
     for it, n in vis:
         sd.text((it.x - x0 + 2, it.y - y0 + 4), it.text[:n], font=it.font, fill=(0, 0, 0, 150), anchor="ls")
     img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(10)))
+    gl = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(gl)
+    glow = False
+    for it, n in vis:
+        if it.color == YELLOW:
+            glow = True
+            gd.text((it.x - x0, it.y - y0), it.text[:n], font=it.font, fill=(255, 190, 20, 150), anchor="ls")
+    if glow:
+        img.alpha_composite(gl.filter(ImageFilter.GaussianBlur(max(6, vis[0][0].font.size // 6))))
     d = ImageDraw.Draw(img)
     for it, n in vis:
         d.text((it.x - x0, it.y - y0), it.text[:n], font=it.font, fill=it.color + (255,), anchor="ls")
@@ -479,6 +503,18 @@ def sfx_glitch(rng):
     return (x * env * 0.5).astype(np.float32)
 
 
+def sfx_riser(dur=0.9):
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    x = np.random.default_rng(5).normal(0, 1, n)
+    out = np.zeros(n, np.float32)
+    for w, a in ((30, 1.0), (10, 0.6), (3, 0.35)):
+        out += np.convolve(x, np.ones(w) / w, mode="same").astype(np.float32) * a
+    tone = np.sin(2 * np.pi * np.cumsum(180 + 900 * (t / dur) ** 2) / SR) * 0.15
+    env = (t / dur) ** 2.5
+    return ((out * np.linspace(0.3, 1, n) + tone) * env * 1.6).astype(np.float32)
+
+
 def sfx_whoosh():
     n = int(0.55 * SR)
     x = np.random.default_rng(9).normal(0, 1, n)
@@ -528,7 +564,7 @@ def main():
 
     beats = spec["beats"]
     voice, total = build_voice(spec, beats, work, use_eleven, key)
-    bg, cuts = build_background(beats, total, W, H, work, rng, style)
+    bg, cuts = build_background(beats, total, W, H, work, rng, style, spec.get("max_shot", 2.8))
 
     blocks = make_blocks_glitch(beats, W, H) if style == "glitch" else make_blocks_type(beats, W, H)
     bigwords = make_bigwords(beats)
@@ -558,8 +594,16 @@ def main():
         if 0 <= i < j:
             sfx[i:j] += sig[:j - i] * vol
     boom = sfx_boom()
+    riser = sfx_riser()
+    hook_hits = [0.0] if spec.get("hook_hit", True) else []
+    for t in big_hits + hook_hits:
+        add(boom, t, spec.get("boom_volume", 0.55))
     for t in big_hits:
-        add(boom, t, spec.get("boom_volume", 0.5))
+        add(riser, t - len(riser) / SR, 0.18)
+    if style == "type":
+        wh = sfx_whoosh()
+        for c in cuts[1:]:
+            add(wh, c - 0.22, 0.07)
     if style == "glitch":
         for a, _ in gl_events:
             add(sfx_glitch(rng), a, 0.09)
@@ -571,7 +615,7 @@ def main():
     voice.astype(np.float32).tofile(vpath)
     sfx.tofile(spath)
     mix = work / "mix.wav"
-    mvol = spec.get("music_volume", 0.24)
+    mvol = spec.get("music_volume", 0.34)
     S.run(["ffmpeg", "-y", "-v", "error",
            "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(vpath),
            "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(spath),
@@ -581,7 +625,8 @@ def main():
            f"[1:a]aformat=channel_layouts=stereo[fx];"
            f"[2:a]atrim=0:{total:.3f},volume={mvol},afade=t=out:st={total - 1.8:.3f}:d=1.8,"
            f"aformat=channel_layouts=stereo[mu];"
-           f"[vo][fx][mu]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.95[a]",
+           f"[vo]asplit=2[vo1][vsc];[mu][vsc]sidechaincompress=threshold=0.03:ratio=3:attack=20:release=350[mud];"
+           f"[vo1][fx][mud]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.95[a]",
            "-map", "[a]", "-t", f"{total:.3f}", str(mix)])
 
     # --- Video Bild für Bild
@@ -594,7 +639,8 @@ def main():
                                "-c:v", "libx264", "-preset", "veryfast" if args.preview else "medium",
                                "-crf", "21", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
                                "-shortest", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
-    grain = Grain(W, H, 13 if style == "glitch" else 6)
+    grain = Grain(W, H, 13 if style == "glitch" else 7)
+    fx_cut = spec.get("cut_flash", True)
     cache, bw_cache = {}, {}
     fsize = W * H * 3
     last = np.zeros((H, W, 3), np.uint8)
@@ -608,11 +654,16 @@ def main():
             frame = np.zeros_like(frame)
         else:
             sc = 1.0
-            for bt in big_hits:                               # Punch-Zoom bei großen Wörtern
-                if 0 <= t - bt < 0.35:
-                    sc = max(sc, 1.0 + 0.05 * (1 - (t - bt) / 0.35) ** 2)
+            for bt in big_hits + [0.0]:                       # Punch-Zoom bei großen Wörtern + Hook
+                if 0 <= t - bt < 0.4:
+                    sc = max(sc, 1.0 + 0.09 * (1 - (t - bt) / 0.4) ** 2)
+            for c in cuts[1:]:                                # Zoom-Übergang bei jedem Schnitt
+                if 0 <= t - c < 0.25:
+                    sc = max(sc, 1.0 + 0.10 * (1 - (t - c) / 0.25) ** 3)
             if sc > 1.001:
                 frame = punch(frame, sc)
+            if fx_cut and any(0 <= t - c < 1.0 / FPS for c in cuts[1:]):
+                frame = np.clip(frame.astype(np.int16) + 55, 0, 255).astype(np.uint8)
             for bi, bw in enumerate(bigwords):                # riesige Hintergrundwörter
                 if bw["start"] <= t < bw["end"]:
                     n = min(len(bw["text"]), int((t - bw["start"]) / 0.09) + 1)
@@ -640,6 +691,20 @@ def main():
                 if a <= t < e:
                     frame = glitch(frame, rng, 1.0 if W >= 1280 else 0.5)
                     break
+        # Einschlag bei großen Wörtern / Hook: Wackeln, Blitz, RGB-Versatz
+        hit = min([t - bt for bt in big_hits + [0.0] if 0 <= t - bt < 0.45] or [None]) if True else None
+        if hit is not None:
+            k = 1 - hit / 0.45
+            amp = 22 * (W / 1920) * k ** 2
+            dx, dy = rng.uniform(-amp, amp), rng.uniform(-amp, amp)
+            M = np.float32([[1, 0, dx], [0, 1, dy]])
+            frame = cv2.warpAffine(frame, M, (W, H), borderMode=cv2.BORDER_REFLECT)
+            if hit < 0.12:
+                frame = np.clip(frame.astype(np.float32) + 170 * (1 - hit / 0.12), 0, 255).astype(np.uint8)
+            if hit < 0.1:
+                sh = int(12 * (W / 1920))
+                frame[..., 0] = np.roll(frame[..., 0], sh, axis=1)
+                frame[..., 2] = np.roll(frame[..., 2], -sh, axis=1)
         frame = grain.apply(frame)
         writer.stdin.write(frame.tobytes())
         if fi % (FPS * 10) == 0:

@@ -24,7 +24,10 @@ SR = 44100
 # Stimme: immer dieselbe.
 # Bevorzugt: "Simon – Deep and Strong" (deutscher Muttersprachler, ruhiger Erzähler; braucht Bezahl-Plan).
 # Free-Plan: automatisch "Brian" (tief, ruhig).
-ELEVEN_VOICES = [v for v in [os.environ.get("ELEVENLABS_VOICE_ID"), "tZPwJezAhAZUGGBZDmR0", "nPczCjzI2devNBz1zQrb"] if v]
+ELEVEN_VOICES = [v for v in [os.environ.get("ELEVENLABS_VOICE_ID"),
+                             "FTNCalFNG5bRnkkaP5Ug",   # "Otto" – Wunschstimme, deutsch, ruhig (Bezahl-Plan)
+                             "tZPwJezAhAZUGGBZDmR0",   # "Simon" – deutsch (Bezahl-Plan)
+                             "nPczCjzI2devNBz1zQrb"] if v]   # "Brian" – Free-Plan
 ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 EDGE_VOICE = "de-DE-FlorianMultilingualNeural"
 

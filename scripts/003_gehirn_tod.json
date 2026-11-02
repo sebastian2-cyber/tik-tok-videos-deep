@@ -1,0 +1,141 @@
+{
+  "title": "Was dein Gehirn tut, wenn du stirbst",
+  "caption": "Forscher haben aufgezeichnet, was im Gehirn passiert, wenn wir sterben… 🤍 #wissenschaft #gehirn #leben #deep #fakten #fyp",
+  "style": "type",
+  "max_shot": 2.6,
+  "beats": [
+    {
+      "text": "Forscher haben aufgezeichnet, was dein Gehirn tut, wenn du [STIRBST]",
+      "clip": [
+        "heart monitor",
+        "hospital monitor",
+        "hospital"
+      ]
+    },
+    {
+      "text": "Und was sie gesehen haben, / hat sie *sprachlos* gemacht.",
+      "clip": [
+        "doctor",
+        "surgeon",
+        "hospital corridor"
+      ]
+    },
+    {
+      "text": "2022 lag ein *87-jähriger* Mann im Krankenhaus.",
+      "say": "Zweitausendzweiundzwanzig lag ein siebenundachtzigjähriger Mann im Krankenhaus.",
+      "clip": [
+        "old man",
+        "hospital bed",
+        "elderly"
+      ],
+      "bg": "2022"
+    },
+    {
+      "text": "Ärzte maßen gerade seine *Gehirnströme,*",
+      "clip": [
+        "brain",
+        "neurons"
+      ]
+    },
+    {
+      "text": "als sein Herz plötzlich *aufhörte* zu schlagen.",
+      "clip": [
+        "heartbeat",
+        "heart monitor",
+        "heart"
+      ]
+    },
+    {
+      "text": "Zum ersten Mal / wurde ein sterbendes menschliches Gehirn *aufgezeichnet.*",
+      "clip": [
+        "brain scan",
+        "x-ray",
+        "brain"
+      ]
+    },
+    {
+      "text": "Und es wurde nicht einfach *dunkel.*",
+      "clip": [
+        "dark",
+        "darkness",
+        "night"
+      ]
+    },
+    {
+      "text": "In den *30 Sekunden* vor und nach dem letzten Herzschlag / *explodierte* die Aktivität.",
+      "say": "In den dreißig Sekunden vor und nach dem letzten Herzschlag explodierte die Aktivität.",
+      "clip": [
+        "lightning",
+        "thunder",
+        "storm"
+      ],
+      "bg": "30 SEK"
+    },
+    {
+      "text": "Genau die Wellen, / die entstehen, wenn wir *träumen* / oder uns *erinnern.*",
+      "clip": [
+        "dream",
+        "sleeping",
+        "clouds"
+      ]
+    },
+    {
+      "text": "Die Forscher vermuten: / Er hat sein Leben vielleicht ein letztes Mal [GESEHEN]",
+      "clip": [
+        "memories",
+        "old photos",
+        "film"
+      ]
+    },
+    {
+      "text": "Seine Kindheit.",
+      "clip": [
+        "children playing",
+        "child running",
+        "kids"
+      ]
+    },
+    {
+      "text": "Den ersten Kuss.",
+      "clip": [
+        "kiss",
+        "couple kissing",
+        "couple"
+      ]
+    },
+    {
+      "text": "Die Menschen, die er *geliebt* hat.",
+      "clip": [
+        "family",
+        "hug",
+        "family sunset"
+      ]
+    },
+    {
+      "text": "Es war nur ein einziger Patient. / Aber andere Studien zeigen *dasselbe Muster.*",
+      "clip": [
+        "laboratory",
+        "scientist",
+        "microscope"
+      ]
+    },
+    {
+      "text": "Vielleicht ist das Letzte, was du siehst, / also nicht die *Dunkelheit.*",
+      "clip": [
+        "tunnel light",
+        "light",
+        "tunnel"
+      ],
+      "pause": 0.5
+    },
+    {
+      "text": "Sondern die Menschen, die du [LIEBST]",
+      "clip": [
+        "sunset silhouette",
+        "silhouette",
+        "sunset"
+      ],
+      "pause": 1.9
+    }
+  ]
+}

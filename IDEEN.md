@@ -1,6 +1,26 @@
 # Video-Ideen
 
 Erledigte Ideen mit [x] markieren und die Skript-Nummer dahinter schreiben.
+Ganz oben = höchstes Viral-Potenzial. Neue Ideen immer nach der Viral-Formel in CLAUDE.md ergänzen.
+
+## Top (sehr hohes Viral-Potenzial)
+
+- [x] Forscher haben aufgezeichnet, was dein Gehirn tut, wenn du stirbst (EEG-Studie 2022) → 003
+- [ ] Die letzten Worte eines Astronauten / Voyager: das letzte Foto der Erde („Pale Blue Dot“, 1990)
+- [ ] In 8 Minuten 20 Sekunden könnte die Sonne schon weg sein – und du würdest es nicht merken
+- [ ] Du stirbst jede Nacht ein bisschen: Was im Schlaf mit deinem Gehirn passiert (Gehirn „wäscht“ sich)
+- [ ] Das grausamste Experiment: Kinder ohne Sprache aufziehen (Friedrich II., 13. Jh.)
+- [ ] Wie sich Ertrinken wirklich anfühlt – und warum es niemand bemerkt (stilles Ertrinken)
+- [ ] Wenn du in ein Schwarzes Loch fällst, siehst du die ganze Zukunft des Universums
+- [ ] Die Menschen in deinen Träumen hast du alle schon einmal gesehen (Gesichter-Theorie, als Theorie)
+- [ ] Ein Mann wachte nach 19 Jahren aus dem Koma auf (Terry Wallis) – was er als Erstes sagte
+- [ ] Das Geräusch, das die NASA im All aufgenommen hat (Schwarzes Loch im Perseus-Haufen, 2022)
+- [ ] Du wirst die meisten Menschen, die du je getroffen hast, nie wiedersehen
+- [ ] Die einsamste Stimme der Welt: der letzte Sprecher einer Sprache
+- [ ] Warum du dich an fast nichts aus deinen ersten 3 Lebensjahren erinnerst (Kindheitsamnesie)
+- [ ] Unser Universum könnte in jedem Moment verschwinden (falsches Vakuum, als Theorie)
+
+## Weitere
 
 - [x] Du hast in deinem ganzen Leben noch nie etwas berührt (Atome stoßen sich ab) → 001
 - [ ] Das Licht der Sterne, die du siehst – viele davon gibt es vielleicht schon nicht mehr

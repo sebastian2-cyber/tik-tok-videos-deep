@@ -1,8 +1,45 @@
 # TikTok-Videos (deutsch) – Anleitung für Claude
 
-Der Nutzer schreibt z. B. **„Erstell mir ein neues Video“**. Dann machst du ALLES selbst:
-Idee → Skript → Video rendern → Video an den Nutzer schicken (SendUserFile) → committen & pushen.
-Nicht nachfragen, außer der Nutzer wünscht ein bestimmtes Thema.
+## Auslöser: „brauche neues Video“ (oder ähnlich: „neues Video“, „mach ein Video“, „erstell mir ein Video“)
+
+Dann machst du ALLES selbst, ohne Rückfragen:
+neues virales Thema → Skript mit Killer-Hook → Preview prüfen → final rendern → Video schicken
+(SendUserFile) + TikTok-Beschreibung → `IDEEN.md` abhaken → committen & pushen.
+Jedes Mal ein ANDERES Thema als alle Skripte in `scripts/`. Nur wenn der Nutzer ein Thema nennt, dieses nehmen.
+Qualitäts-Maßstab: Video 003 (`scripts/003_gehirn_tod.json`) – mindestens so stark.
+
+## Viral-Formel (Pflicht für jedes Skript)
+
+**Themenwahl** – nur Themen mit sehr hohem Viral-Potenzial:
+- Tod, Sterben, Bewusstsein, Gehirn, Schlaf/Träume, Zeit, Universum-Horror (Schwarze Löcher, Ende der Welt),
+  „Du“-Themen (dein Körper, deine Wahrscheinlichkeit, dein Leben), dunkle Geschichte, ungelöste Rätsel,
+  Experimente mit Menschen, Dinge, die „gerade jetzt“ passieren.
+- Muss echte, überprüfbare Fakten/Studien haben (Jahr, Zahl, Ort) – das macht es glaubwürdig.
+- Muss persönlich werden: am Ende geht es um DICH / die Menschen, die du liebst.
+
+**Hook (0–3 s)** – entscheidet alles:
+- Erster Satz ≤ 3,5 s gesprochen, endet mit einem [GROSSEN WORT] → Bass-Hit + Schwarz-Schnitt.
+- Muster: „Forscher haben aufgezeichnet, was dein Gehirn tut, wenn du [STIRBST]“ ·
+  „In 8 Minuten könnte die Sonne schon weg sein – und du würdest es nicht [MERKEN]“ ·
+  „Dieses Experiment wurde verboten, weil …“ · „Du hast heute schon X getan, ohne es zu merken.“
+- Kein „Hallo“, keine Einleitung, sofort rein. Angst, Neugier oder „das betrifft mich“.
+- Satz 2 = Verstärkung/offene Schleife: „Und was sie gesehen haben, hat sie *sprachlos* gemacht.“
+
+**Aufbau (50–65 s, 130–170 Wörter):**
+1. Hook  2. Verstärkung  3. Story mit konkreten Fakten (Jahr, Zahl, Person) in kurzen Sätzen
+4. Höhepunkt mit [GROSSEM WORT]  5. Montage aus 3 sehr kurzen Sätzen („Seine Kindheit.“ „Den ersten Kuss.“)
+6. Ehrliche Einordnung („Es war nur ein Patient. Aber …“)  7. Emotionales Ende auf ein [GROSSES WORT], `pause` 1.9
+
+**Effekte im Skript:**
+- 3–4 [GROSSE WÖRTER] pro Video (Hook, Höhepunkt, Ende) – nie mehr, sonst verpufft es.
+- 1–2 `bg` Hintergrundwörter/-zahlen (Jahreszahl, „30 SEK“, „8:20“).
+- `*gelb*` für 1–2 Schlüsselwörter pro Satz.
+- `"max_shot": 2.6` (schnelle Schnitte). Clips: konkret und emotional passend, 2–3 Suchbegriffe pro Beat.
+- Fakten-Check vor dem Rendern; Spekulation als „Forscher vermuten …“ kennzeichnen.
+
+**Engine macht automatisch:** Hook-Einschlag bei 0 s, Zoom-Übergang + Blitz + Whoosh bei jedem Schnitt,
+Riser → Bass-Hit + Wackeln + Blitz + RGB-Versatz bei großen Wörtern, Glow auf gelben Wörtern,
+Musik duckt unter der Stimme und kommt in Pausen hoch.
 
 ## Ablauf
 
@@ -26,8 +63,10 @@ Nicht nachfragen, außer der Nutzer wünscht ein bestimmtes Thema.
 ## Stimme
 
 - ElevenLabs-Key: Umgebungsvariable `ELEVENLABS_API_KEY` oder Datei `.elevenlabs_key` (nie committen!).
-- Reihenfolge (automatisch): `ELEVENLABS_VOICE_ID` → „Simon – Deep and Strong“ (deutscher Muttersprachler,
-  braucht Bezahl-Plan) → „Brian“ (Free-Plan). Modell `eleven_multilingual_v2`.
+- Wunschstimme des Nutzers: **„Otto“** (`FTNCalFNG5bRnkkaP5Ug`, deutsch, ruhig) – IMMER zuerst versuchen.
+  Reihenfolge (automatisch): `ELEVENLABS_VOICE_ID` → Otto → Simon (deutsch) → Brian.
+  Otto & Simon sind Library-Stimmen → brauchen ElevenLabs-Bezahl-Plan; im Free-Plan fällt es auf Brian zurück.
+  Dem Nutzer sagen, welche Stimme tatsächlich benutzt wurde (steht in der Render-Ausgabe).
 - Ohne Key: Fallback Microsoft `de-DE-FlorianMultilingualNeural` (klingt deutlich schlechter).
 - Free-Plan = 10.000 Zeichen/Monat ≈ 9 Videos. Sprachausgaben werden in `.cache/tts` gecacht,
   Neu-Rendern kostet also nichts. Erst mit `--preview` (halbe Auflösung, schnell) prüfen, dann final.
