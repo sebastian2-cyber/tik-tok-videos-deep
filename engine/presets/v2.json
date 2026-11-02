@@ -1,0 +1,15 @@
+{
+  "_info": "Preset v2 – 'Profi-Kanal': 9:16 Hochformat, ElevenLabs v3 (menschlicher), echte Sound-Effekte, Voice-Mastering. Aktiv mit \"preset\": \"v2\" im Skript.",
+  "vertical": true,
+  "voice_model": "eleven_v3",
+  "sfx": "samples",
+  "audio_master": true,
+  "max_shot": 2.4,
+  "music_volume": 0.5,
+  "cut_flash": false,
+  "caption_scale": 1.18,
+  "text_anchor_vertical": 0.42,
+  "shake": 0.6,
+  "hook_sfx": "impact_soft",
+  "whoosh_chance": 0.45
+}

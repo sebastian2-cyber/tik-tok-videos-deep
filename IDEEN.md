@@ -9,7 +9,7 @@ Ganz oben = höchstes Viral-Potenzial. Neue Ideen immer nach der Viral-Formel in
 - [ ] Die letzten Worte eines Astronauten / Voyager: das letzte Foto der Erde („Pale Blue Dot“, 1990)
 - [ ] In 8 Minuten 20 Sekunden könnte die Sonne schon weg sein – und du würdest es nicht merken
 - [ ] Du stirbst jede Nacht ein bisschen: Was im Schlaf mit deinem Gehirn passiert (Gehirn „wäscht“ sich)
-- [ ] Das grausamste Experiment: Kinder ohne Sprache aufziehen (Friedrich II., 13. Jh.)
+- [x] Das grausamste Experiment: Kinder ohne Sprache aufziehen (Friedrich II., 13. Jh.) → 004 (v2)
 - [ ] Wie sich Ertrinken wirklich anfühlt – und warum es niemand bemerkt (stilles Ertrinken)
 - [ ] Wenn du in ein Schwarzes Loch fällst, siehst du die ganze Zukunft des Universums
 - [ ] Die Menschen in deinen Träumen hast du alle schon einmal gesehen (Gesichter-Theorie, als Theorie)

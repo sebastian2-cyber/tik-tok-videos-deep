@@ -40,6 +40,15 @@ YELLOW = (238, 196, 26)
 PAUSE = 0.35          # Pause nach einem Satz
 BLACK_HOLD = 0.85     # Schwarz-Pause nach einem großen Schlusswort
 
+# Echte Sound-Effekte in assets/sfx: Name -> Sekunde des Einschlags in der Datei
+SFX_LIB = {"impact_big": 2.18, "impact_soft": 1.76, "impact_trailer": 1.00, "heartbeat_impact": 0.09,
+           "whoosh_fast": 1.08, "whoosh_tunnel": 0.62, "whoosh_impact": 0.56, "riser_trailer": 2.50}
+
+# Voice-Mastering (Preset v2): Rumpeln weg, Zischlaute weicher, Wärme + Präsenz, sanfte Kompression
+VOICE_MASTER = ("highpass=f=70,deesser=i=0.35,equalizer=f=160:t=q:w=1:g=2,"
+                "equalizer=f=3200:t=q:w=1.2:g=2,equalizer=f=9000:t=q:w=1:g=-1.5,"
+                "acompressor=threshold=-20dB:ratio=3:attack=8:release=140:makeup=2,")
+
 
 # ---------------------------------------------------------------------------
 # Skript-Markup
@@ -100,7 +109,11 @@ def build_voice(spec, beats, work, use_eleven, key):
         if use_eleven:
             prev_t = " ".join(say_of(i) for i in range(max(0, idxs[0] - 2), idxs[0]))
             next_t = " ".join(say_of(i) for i in range(idxs[-1] + 1, min(len(beats), idxs[-1] + 3)))
-            words = S.tts_eleven(say, prev_t, next_t, key, mp3)
+            model = spec.get("voice_model")
+            tone = beats[idxs[0]].get("tone")
+            if tone and model == "eleven_v3":
+                say = f"[{tone}] {say}"
+            words = S.tts_eleven(say, prev_t, next_t, key, mp3, model=model)
         else:
             words = S.tts_edge(say, mp3, rate=spec.get("rate", "-6%"), pitch=spec.get("pitch", "-2Hz"))
         a, words = S.trim_silence(S.decode(mp3), words)
@@ -216,12 +229,12 @@ def is_num(w):
     return bool(re.search(r"\d", w)) and len(re.sub(r"[\d.,%^:/+\-x×]", "", w)) <= 1
 
 
-def make_blocks_type(beats, W, H):
+def make_blocks_type(beats, W, H, cscale=1.0, vanchor=0.45):
     """Text-Blöcke im Tipp-Stil: bis zu ~3 Zeilen, Buchstabe für Buchstabe aufgebaut."""
     s = W / 1920 if W > H else W / 1080
-    f_norm = font("jakarta-extrabold", 82 * s)
-    f_big = font("jakarta-extrabold", 200 * s)
-    f_num = font("oswald-medium", 118 * s)
+    f_norm = font("jakarta-extrabold", 82 * s * cscale)
+    f_big = font("jakarta-extrabold", 200 * s * cscale)
+    f_num = font("oswald-medium", 118 * s * cscale)
     maxw = W * (0.62 if W > H else 0.86)
     anchors = [0.5, 0.42, 0.5, 0.58, 0.36]
     blocks = []
@@ -243,7 +256,7 @@ def make_blocks_type(beats, W, H):
                 groups[-1] += cur
             else:
                 groups.append(cur)
-        ay = anchors[bi % len(anchors)] if W > H else 0.45
+        ay = anchors[bi % len(anchors)] if W > H else vanchor
         for gi, g in enumerate(groups):
             # ausgewogene Zeilen: Breite so wählen, dass alle Zeilen ähnlich lang sind
             normal = [t for t in g if t["style"] != "big"]
@@ -272,7 +285,7 @@ def make_blocks_type(beats, W, H):
             for ln in lines:
                 if ln[0]["style"] == "big":
                     fb = f_big
-                    while fb.getlength(ln[0]["word"].upper()) > W * 0.86 and fb.size > 60:
+                    while fb.getlength(ln[0]["word"].upper()) > W * 0.86 and fb.size > 16:
                         fb = font("jakarta-extrabold", fb.size - 10)
                     metrics.append((ln, fb, fb.size * 0.92))
                 else:
@@ -541,6 +554,9 @@ def main():
     args = ap.parse_args()
 
     spec = json.loads(Path(args.script).read_text())
+    if spec.get("preset"):   # Voreinstellungen aus engine/presets/<name>.json (Skript-Werte haben Vorrang)
+        pre = json.loads((ROOT / "engine" / "presets" / f"{spec['preset']}.json").read_text())
+        spec = {**{k: v for k, v in pre.items() if not k.startswith("_")}, **spec}
     name = Path(args.script).stem
     style = spec.get("style", "type")
     vertical = args.vertical or spec.get("vertical")
@@ -566,7 +582,8 @@ def main():
     voice, total = build_voice(spec, beats, work, use_eleven, key)
     bg, cuts = build_background(beats, total, W, H, work, rng, style, spec.get("max_shot", 2.8))
 
-    blocks = make_blocks_glitch(beats, W, H) if style == "glitch" else make_blocks_type(beats, W, H)
+    blocks = make_blocks_glitch(beats, W, H) if style == "glitch" else make_blocks_type(
+        beats, W, H, spec.get("caption_scale", 1.0), spec.get("text_anchor_vertical", 0.45))
     bigwords = make_bigwords(beats)
     blacks = [(b["_black"], total if b is beats[-1] else b["_end"]) for b in beats if b.get("_black")]
     for bl in blocks:
@@ -593,17 +610,43 @@ def main():
         j = min(len(sfx), i + len(sig))
         if 0 <= i < j:
             sfx[i:j] += sig[:j - i] * vol
-    boom = sfx_boom()
-    riser = sfx_riser()
-    hook_hits = [0.0] if spec.get("hook_hit", True) else []
-    for t in big_hits + hook_hits:
-        add(boom, t, spec.get("boom_volume", 0.55))
-    for t in big_hits:
-        add(riser, t - len(riser) / SR, 0.18)
-    if style == "type":
-        wh = sfx_whoosh()
-        for c in cuts[1:]:
-            add(wh, c - 0.22, 0.07)
+    beat_cuts = sorted({round(b["_start"], 3) for b in beats[1:] if not b.get("same_clip")})
+    if spec.get("sfx") == "samples":
+        # Echte Sound-Effekte (assets/sfx, Mixkit-Lizenz). "hit" = Zeitpunkt des Einschlags in der Datei.
+        lib = {n: (S.decode(ROOT / "assets" / "sfx" / f"{n}.mp3"), hit) for n, hit in SFX_LIB.items()}
+
+        def place(name, at, vol):
+            sig, hit = lib[name]
+            st = at - hit
+            if st < 0:
+                sig = sig[int(-st * SR):]
+                st = 0
+            add(sig, st, vol)
+        place(spec.get("hook_sfx", "impact_soft"), 0.0, 0.55)
+        for t in big_hits:
+            place("riser_trailer", t, 0.45)
+            place("impact_big", t, 0.55)
+        last_wh = -10
+        for c in beat_cuts:
+            if c - last_wh > 4 and rng.random() < spec.get("whoosh_chance", 0.45) and \
+                    not any(abs(c - t) < 1.5 for t in big_hits):
+                place("whoosh_fast", c, 0.22)
+                last_wh = c
+        for b in beats:
+            if b.get("sfx"):
+                place(b["sfx"], b["_start"] + 0.05, b.get("sfx_volume", 0.5))
+    else:
+        boom = sfx_boom()
+        riser = sfx_riser()
+        hook_hits = [0.0] if spec.get("hook_hit", True) else []
+        for t in big_hits + hook_hits:
+            add(boom, t, spec.get("boom_volume", 0.55))
+        for t in big_hits:
+            add(riser, t - len(riser) / SR, 0.18)
+        if style == "type":
+            wh = sfx_whoosh()
+            for c in cuts[1:]:
+                add(wh, c - 0.22, 0.07)
     if style == "glitch":
         for a, _ in gl_events:
             add(sfx_glitch(rng), a, 0.09)
@@ -621,11 +664,14 @@ def main():
            "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(spath),
            "-stream_loop", "-1", "-i", str(spec.get("music", MUSIC)),
            "-filter_complex",
-           f"[0:a]loudnorm=I=-15:TP=-1.5:LRA=11,aresample={SR},aformat=channel_layouts=stereo[vo];"
+           f"[0:a]{VOICE_MASTER if spec.get('audio_master') else ''}"
+           f"loudnorm=I={-14 if spec.get('audio_master') else -15}:TP=-1.5:LRA={9 if spec.get('audio_master') else 11},"
+           f"aresample={SR},aformat=channel_layouts=stereo[vo];"
            f"[1:a]aformat=channel_layouts=stereo[fx];"
            f"[2:a]atrim=0:{total:.3f},volume={mvol},afade=t=out:st={total - 1.8:.3f}:d=1.8,"
            f"aformat=channel_layouts=stereo[mu];"
-           f"[vo]asplit=2[vo1][vsc];[mu][vsc]sidechaincompress=threshold=0.03:ratio=3:attack=20:release=350[mud];"
+           f"[vo]asplit=2[vo1][vsc];[mu][vsc]sidechaincompress="
+           f"{'threshold=0.08:ratio=2:attack=40:release=700' if spec.get('audio_master') else 'threshold=0.03:ratio=3:attack=20:release=350'}[mud];"
            f"[vo1][fx][mud]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.95[a]",
            "-map", "[a]", "-t", f"{total:.3f}", str(mix)])
 
@@ -695,7 +741,7 @@ def main():
         hit = min([t - bt for bt in big_hits + [0.0] if 0 <= t - bt < 0.45] or [None]) if True else None
         if hit is not None:
             k = 1 - hit / 0.45
-            amp = 22 * (W / 1920) * k ** 2
+            amp = 22 * (max(W, H) / 1920) * spec.get("shake", 1.0) * k ** 2
             dx, dy = rng.uniform(-amp, amp), rng.uniform(-amp, amp)
             M = np.float32([[1, 0, dx], [0, 1, dy]])
             frame = cv2.warpAffine(frame, M, (W, H), borderMode=cv2.BORDER_REFLECT)

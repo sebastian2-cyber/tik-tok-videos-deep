@@ -8,6 +8,32 @@ neues virales Thema → Skript mit Killer-Hook → Preview prüfen → final ren
 Jedes Mal ein ANDERES Thema als alle Skripte in `scripts/`. Nur wenn der Nutzer ein Thema nennt, dieses nehmen.
 Qualitäts-Maßstab: Video 003 (`scripts/003_gehirn_tod.json`) – mindestens so stark.
 
+## Presets (WICHTIG – nicht kaputt machen)
+
+- **v1 = Standard** für „brauche neues Video“ (Stand Video 003: 16:9, Brian/multilingual_v2, selbst erzeugte
+  Sounds). Skripte OHNE `"preset"` laufen genau so. Eingefrorene Kopie: `engine/presets/v1/`
+  (+ Git-Tag `preset-v1`). Falls die Haupt-Engine je kaputt ist:
+  `python3 engine/presets/v1/make_video.py scripts/XYZ.json`.
+- **v2 = „Profi-Kanal“** (Video 004), aktiv mit `"preset": "v2"` im Skript; Werte in `engine/presets/v2.json`:
+  9:16 Hochformat, ElevenLabs **eleven_v3** (menschlicher, versteht `"tone"`), echte Sound-Effekte
+  (`assets/sfx`: Riser + Cinematic Impact bei großen Wörtern, Whoosh nur an manchen Schnitten),
+  Voice-Mastering (EQ, De-Esser, Kompressor, -14 LUFS), Musik lauter + sanftes Ducking, größere Untertitel.
+- Welches Preset Standard ist, entscheidet NUR der Nutzer. Sagt er „v2 ist besser“ / „nimm immer das neue“,
+  dann v2 als Standard eintragen (hier) – v1 bleibt trotzdem erhalten.
+- Neue Experimente immer als neues Preset (v3 …), nie v1/v2 verändern.
+
+### Nur in v2
+- `"tone"` pro Beat: Sprechanweisung für eleven_v3, EIN englisches Wort: `serious`, `whispers`, `softly`,
+  `sad`, `excited`. Sparsam: Hook `serious`, kurze Montage-Sätze `whispers`, Ende `softly`.
+- `"sfx": "heartbeat_impact"` pro Beat = zusätzlicher Effekt am Beat-Start (Namen siehe `SFX_LIB` in der Engine).
+- Hochformat: große Wörter max. ~13 Buchstaben ([LEBENSWICHTIG] geht, [ÜBERLEBENSWICHTIG] wird zu klein).
+- v3 spricht langsamer → für ~60 s nur ~120–140 Wörter.
+
+## Clip-Kontrolle (beide Presets)
+Nach dem Preview IMMER alle Clips ansehen. Bisher unpassend gewesen: Kätzchen bei „newborn“, Schiff bei
+„crib“, Buddha bei „monk“, Hypnose-Comic-Gesicht bei „brain“, Pasta bei „baby hand“. Gesperrte Begriffe/IDs
+stehen in `engine/sources.py` (`BAD_CLIPS`, Regex in `mixkit_search`) – neue Fehlgriffe dort ergänzen.
+
 ## Viral-Formel (Pflicht für jedes Skript)
 
 **Themenwahl** – nur Themen mit sehr hohem Viral-Potenzial:

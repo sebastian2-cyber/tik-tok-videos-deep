@@ -60,20 +60,26 @@ def norm(s):
 
 # --- Stimme -------------------------------------------------------------------
 
-def tts_eleven(text, prev_text, next_text, key, out_mp3):
-    """ElevenLabs mit Wort-Zeitstempeln. Ergebnisse werden gecacht (spart Credits)."""
+def tts_eleven(text, prev_text, next_text, key, out_mp3, model=None):
+    """ElevenLabs mit Wort-Zeitstempeln. Ergebnisse werden gecacht (spart Credits).
+    model="eleven_v3": menschlicher/emotionaler, versteht Anweisungen wie [whispers] im Text."""
     import shutil as _sh
-    settings = {"stability": 0.4, "similarity_boost": 0.8, "style": 0.2, "use_speaker_boost": True, "speed": 0.94}
+    model = model or ELEVEN_MODEL
+    if model == "eleven_v3":
+        settings = {"stability": 0.5, "similarity_boost": 0.8, "use_speaker_boost": True}
+        prev_text = next_text = None      # v3 unterstützt kein Request-Stitching
+    else:
+        settings = {"stability": 0.4, "similarity_boost": 0.8, "style": 0.2, "use_speaker_boost": True, "speed": 0.94}
     bad = CACHE / "tts" / "unavailable_voices.txt"
     skip = set(bad.read_text().split()) if bad.exists() else set()
     last_err = None
     for voice in [v for v in ELEVEN_VOICES if v not in skip]:
-        h = hashlib.md5(json.dumps([voice, ELEVEN_MODEL, text, prev_text, next_text, settings]).encode()).hexdigest()
+        h = hashlib.md5(json.dumps([voice, model, text, prev_text, next_text, settings]).encode()).hexdigest()
         cm, cj = CACHE / "tts" / f"{h}.mp3", CACHE / "tts" / f"{h}.json"
         if cm.exists() and cj.exists():
             _sh.copy(cm, out_mp3)
             return [tuple(w) for w in json.loads(cj.read_text())]
-        body = json.dumps({"text": text, "model_id": ELEVEN_MODEL, "language_code": "de",
+        body = json.dumps({"text": text, "model_id": model, "language_code": "de",
                            "previous_text": prev_text or None, "next_text": next_text or None,
                            "voice_settings": settings}).encode()
         try:
@@ -106,6 +112,7 @@ def tts_eleven(text, prev_text, next_text, key, out_mp3):
                 end = e0
         if cur:
             words.append((cur, start, end))
+        words = [w for w in words if not re.fullmatch(r"\[[^\]]*\]", w[0])]   # [whispers] usw. entfernen
         cm.parent.mkdir(parents=True, exist_ok=True)
         _sh.copy(out_mp3, cm)
         cj.write_text(json.dumps(words))
@@ -225,6 +232,9 @@ def mixkit_items(url):
     return items
 
 
+BAD_CLIPS = {"32645"}   # unpassend/albern (z. B. Hypnose-Gesicht bei "brain")
+
+
 def mixkit_search(query, vertical=False):
     """Sucht passende Clips. Liefert IDs, die besten zuerst (Titel muss zum Suchbegriff passen)."""
     q = query.strip().lower()
@@ -236,7 +246,7 @@ def mixkit_search(query, vertical=False):
     items += mixkit_items(f"https://mixkit.co/free-stock-video/discover/?q={urllib.parse.quote_plus(q)}")
     best = {}
     for it in items:
-        if re.search(r"green screen|chroma|brainstorm|logo|mockup|template|text space", it["text"]):
+        if re.search(r"green screen|chroma|brainstorm|logo|mockup|template|text space|hypno|buddha|cartoon|funny|comic|crazy|kitten|cat |puppy|dog|pasta|food", it["text"]) or it["id"] in BAD_CLIPS:
             continue
         hits = sum(1 for w in words if re.search(r"\b" + re.escape(w), it["text"]))
         if hits == 0:

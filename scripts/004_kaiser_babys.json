@@ -1,0 +1,172 @@
+{
+  "title": "Der Kaiser, der verbot, mit Babys zu sprechen",
+  "caption": "Ein Kaiser verbot, mit diesen Babys zu sprechen… was dann passierte 💔 #geschichte #psychologie #liebe #wissen #deep #fyp",
+  "preset": "v2",
+  "style": "type",
+  "beats": [
+    {
+      "text": "Ein Kaiser verbot, mit diesen Babys zu [SPRECHEN]",
+      "tone": "serious",
+      "clip": [
+        "baby crying",
+        "newborn",
+        "baby"
+      ]
+    },
+    {
+      "text": "Was dann passierte, / lässt Forscher bis heute nicht los.",
+      "clip": [
+        "castle",
+        "medieval",
+        "old castle"
+      ]
+    },
+    {
+      "text": "Im *13. Jahrhundert* / wollte Kaiser Friedrich der Zweite wissen,",
+      "say": "Im dreizehnten Jahrhundert wollte Kaiser Friedrich der Zweite wissen,",
+      "clip": [
+        "king",
+        "medieval",
+        "candle"
+      ],
+      "bg": "13. JH."
+    },
+    {
+      "text": "welche Sprache der Mensch / *von Natur aus* spricht.",
+      "clip": [
+        "old book",
+        "ancient book",
+        "library"
+      ]
+    },
+    {
+      "text": "Also ließ er Neugeborene von Ammen versorgen.",
+      "clip": [
+        "baby sleeping",
+        "newborn baby",
+        "baby"
+      ]
+    },
+    {
+      "text": "Sie bekamen Milch. / Sie wurden gebadet.",
+      "clip": [
+        "baby bath",
+        "milk",
+        "baby hand"
+      ]
+    },
+    {
+      "text": "Aber niemand durfte mit ihnen *reden.*",
+      "clip": [
+        "empty room",
+        "dark room",
+        "window"
+      ]
+    },
+    {
+      "text": "Kein Wort.",
+      "tone": "whispers",
+      "clip": [
+        "baby feet",
+        "baby sleeping",
+        "baby"
+      ]
+    },
+    {
+      "text": "Kein Lächeln.",
+      "tone": "whispers",
+      "clip": [
+        "mother",
+        "woman sad",
+        "face"
+      ]
+    },
+    {
+      "text": "Keine Umarmung.",
+      "tone": "whispers",
+      "clip": [
+        "candle",
+        "candle light",
+        "dark"
+      ]
+    },
+    {
+      "text": "Und am Ende / starben die [KINDER]",
+      "clip": [
+        "candle",
+        "candle dark",
+        "dark room"
+      ]
+    },
+    {
+      "text": "So berichtet es ein Mönch aus dieser Zeit.",
+      "clip": [
+        "old manuscript",
+        "quill",
+        "old paper"
+      ]
+    },
+    {
+      "text": "Jahrhunderte später / sahen Forscher etwas *Ähnliches.*",
+      "clip": [
+        "scientist",
+        "laboratory",
+        "research"
+      ]
+    },
+    {
+      "text": "In Rumänien lebten über *100.000* Kinder in Heimen.",
+      "say": "In Rumänien lebten über hunderttausend Kinder in Heimen.",
+      "clip": [
+        "hospital corridor",
+        "corridor",
+        "empty hallway"
+      ],
+      "bg": "100.000"
+    },
+    {
+      "text": "Sie hatten Essen. / Ein Bett. / Aber kaum *Zuwendung.*",
+      "clip": [
+        "child alone",
+        "lonely child",
+        "child bed"
+      ]
+    },
+    {
+      "text": "Ihre Gehirne zeigten / *deutlich weniger* Aktivität.",
+      "clip": [
+        "brain scan",
+        "x-ray",
+        "scan"
+      ]
+    },
+    {
+      "text": "Wir denken, Liebe ist nur ein Gefühl. / Aber für dein Gehirn ist sie [LEBENSWICHTIG]",
+      "clip": [
+        "mother baby",
+        "mother hug",
+        "family"
+      ]
+    },
+    {
+      "text": "Also wenn du heute an jemanden denkst… / sag es ihm.",
+      "tone": "softly",
+      "clip": [
+        "phone",
+        "smartphone night",
+        "phone call"
+      ],
+      "pause": 0.5
+    },
+    {
+      "text": "Vielleicht braucht er es mehr, als du [GLAUBST]",
+      "tone": "softly",
+      "clip": [
+        "sunset silhouette",
+        "silhouette",
+        "sunset"
+      ],
+      "pause": 2.0
+    }
+  ]
+}
