@@ -1,0 +1,24 @@
+{
+  "title": "Du hast die Gegenwart noch nie gesehen",
+  "caption": "Alles, was du gerade siehst, ist schon vorbei… 🤯 Schau es nochmal an. #psychologie #gehirn #wissen #deep #mindblown #fyp",
+  "preset": "v3",
+  "style": "type",
+  "beats": [
+    {"text": "Du hast die Gegenwart noch nie [GESEHEN]", "clip": ["human eye", "eye close up", "eye"]},
+    {"text": "Nicht ein einziges Mal. / Und gleich verstehst du, *warum.*", "clip": ["clock", "time", "watch"]},
+    {"text": "Das Sonnenlicht auf deiner Haut / ist *8 Minuten* alt.", "clip": ["sunlight", "sun rays", "sunset"], "bg": "8:20"},
+    {"text": "Den Mond siehst du so, / wie er vor *einer Sekunde* war.", "clip": ["moon", "full moon", "night sky"]},
+    {"text": "Und die Sterne heute Nacht? / So, wie sie vor Jahren / oder *Jahrhunderten* waren.", "clip": ["stars", "starry sky", "milky way"]},
+    {"text": "Aber es wird noch *verrückter.*", "clip": ["city night", "city lights", "street night"]},
+    {"text": "Dein Gehirn braucht etwa eine *Zehntelsekunde,* / um zu verarbeiten, was deine Augen sehen.", "clip": ["brain scan", "neurons", "eye"], "bg": "0,1 s"},
+    {"text": "Alles, was du gerade siehst, / ist also schon [VORBEI]", "clip": ["dark room", "window", "rain window"]},
+    {"text": "Dieses Video.", "clip": ["phone night", "smartphone", "phone"]},
+    {"text": "Dein Zimmer.", "clip": ["bedroom", "room night", "lamp"]},
+    {"text": "Deine eigene Hand.", "clip": ["hand shadow", "hand light", "open hand"]},
+    {"text": "Damit du das nicht merkst, / rechnet dein Gehirn *voraus.*", "clip": ["neurons", "brain", "electric"]},
+    {"text": "Du siehst nicht die Welt. / Du siehst die *Vorhersage* deines Gehirns.", "clip": ["mirror", "reflection", "person mirror"]},
+    {"text": "Selbst der Mensch neben dir / ist nur ein *Echo* von vor einem Augenblick.", "clip": ["couple", "people silhouette", "friends night"]},
+    {"text": "Und wenn alles, was du siehst, / schon Vergangenheit ist…", "clip": ["ocean night", "waves", "fog"], "pause": 0.4},
+    {"text": "dann hast du die Gegenwart noch nie [GESEHEN]", "clip": ["eye close up", "eye", "human eye"], "pause": 1.2}
+  ]
+}

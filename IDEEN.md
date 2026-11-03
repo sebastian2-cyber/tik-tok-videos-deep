@@ -24,7 +24,7 @@ Ganz oben = höchstes Viral-Potenzial. Neue Ideen immer nach der Viral-Formel in
 
 - [x] Du hast in deinem ganzen Leben noch nie etwas berührt (Atome stoßen sich ab) → 001
 - [ ] Das Licht der Sterne, die du siehst – viele davon gibt es vielleicht schon nicht mehr
-- [ ] Du siehst nie die Gegenwart – dein Gehirn zeigt dir die Vergangenheit (ca. 80 ms Verzögerung)
+- [x] Du siehst nie die Gegenwart – dein Gehirn zeigt dir die Vergangenheit (ca. 80 ms Verzögerung) → 005 (v3)
 - [ ] Was passiert, wenn du in ein Schwarzes Loch fällst (Zeit, Spaghettifizierung, Ereignishorizont)
 - [x] Jedes Atom in deinem Körper wurde in einem Stern geschmiedet – du bist Sternenstaub → 002
 - [ ] Wie groß ist das Universum wirklich? (Sandkörner vs. Sterne, beobachtbares Universum)

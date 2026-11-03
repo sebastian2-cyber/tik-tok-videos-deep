@@ -6,11 +6,12 @@ Dann machst du ALLES selbst, ohne Rückfragen:
 neues virales Thema → Skript mit Killer-Hook → Preview prüfen → final rendern → Video schicken
 (SendUserFile) + TikTok-Beschreibung → `IDEEN.md` abhaken → committen & pushen.
 Jedes Mal ein ANDERES Thema als alle Skripte in `scripts/`. Nur wenn der Nutzer ein Thema nennt, dieses nehmen.
-Qualitäts-Maßstab: Video 003 (`scripts/003_gehirn_tod.json`) – mindestens so stark.
+Qualitäts-Maßstab: Video 005 (`scripts/005_gegenwart.json`, Preset v3) – mindestens so stark.
+Themen, die „den Kopf zerbrechen“: Realität/Wahrnehmung/Zeit/Bewusstsein + Schluss, der in den ersten Satz zurückführt (Loop).
 
 ## Presets (WICHTIG – nicht kaputt machen)
 
-- **v1 = Standard** für „brauche neues Video“ (Stand Video 003: 16:9, Brian/multilingual_v2, selbst erzeugte
+- **v1** (Stand Video 003: 16:9, Brian/multilingual_v2, selbst erzeugte
   Sounds). Skripte OHNE `"preset"` laufen genau so. Eingefrorene Kopie: `engine/presets/v1/`
   (+ Git-Tag `preset-v1`). Falls die Haupt-Engine je kaputt ist:
   `python3 engine/presets/v1/make_video.py scripts/XYZ.json`.
@@ -18,6 +19,14 @@ Qualitäts-Maßstab: Video 003 (`scripts/003_gehirn_tod.json`) – mindestens so
   9:16 Hochformat, ElevenLabs **eleven_v3** (menschlicher, versteht `"tone"`), echte Sound-Effekte
   (`assets/sfx`: Riser + Cinematic Impact bei großen Wörtern, Whoosh nur an manchen Schnitten),
   Voice-Mastering (EQ, De-Esser, Kompressor, -14 LUFS), Musik lauter + sanftes Ducking, größere Untertitel.
+- **v3 = „akzentfrei“** (Video 005), aktiv mit `"preset": "v3"`; Werte in `engine/presets/v3.json`:
+  alles wie v2, ABER Stimme: deutsche Muttersprachler-Stimme (Microsoft `de-DE-ConradNeural`) spricht den Text,
+  ElevenLabs **Voice Changer** (speech-to-speech) macht daraus Otto/Simon (Bezahl-Plan) bzw. Brian (Free).
+  → Aussprache/Betonung 100 % deutsch, kein amerikanischer Akzent mehr (Nutzer hatte sich über Akzent beschwert).
+  Schnitte ~alle 2 s und auf den Musik-Beat gelegt (`beat_snap`). `"tone"` wirkt in v3 NICHT.
+  Kosten: ~1.000 ElevenLabs-Credits pro Video-Minute.
+  Solange der Nutzer nichts anderes sagt: für „brauche neues Video“ **v3** nehmen (Stimme war sein Hauptproblem);
+  v1/v2 bleiben unverändert erhalten.
 - Welches Preset Standard ist, entscheidet NUR der Nutzer. Sagt er „v2 ist besser“ / „nimm immer das neue“,
   dann v2 als Standard eintragen (hier) – v1 bleibt trotzdem erhalten.
 - Neue Experimente immer als neues Preset (v3 …), nie v1/v2 verändern.

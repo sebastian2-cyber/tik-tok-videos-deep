@@ -120,14 +120,56 @@ def tts_eleven(text, prev_text, next_text, key, out_mp3, model=None):
     raise SystemExit(f"Keine ElevenLabs-Stimme nutzbar: {last_err}")
 
 
-def tts_edge(text, out_mp3, rate="-6%", pitch="-2Hz"):
+def sts_eleven(src_mp3, key, out_mp3):
+    """Voice Changer: deutsche Quell-Aufnahme -> ElevenLabs-Stimme. Aussprache/Timing bleiben vom Original
+    (also akzentfrei), nur die Klangfarbe wird ersetzt. Gecacht."""
+    import shutil as _sh
+    settings = {"stability": 0.55, "similarity_boost": 0.85, "style": 0, "use_speaker_boost": True}
+    src = Path(src_mp3).read_bytes()
+    bad = CACHE / "tts" / "unavailable_voices.txt"
+    skip = set(bad.read_text().split()) if bad.exists() else set()
+    last_err = None
+    for voice in [v for v in ELEVEN_VOICES if v not in skip]:
+        h = hashlib.md5(src + json.dumps([voice, "sts", settings]).encode()).hexdigest()
+        cm = CACHE / "tts" / f"sts_{h}.mp3"
+        if cm.exists():
+            _sh.copy(cm, out_mp3)
+            return voice
+        bnd = "----b" + h[:16]
+        body = b""
+        for name, val in (("model_id", "eleven_multilingual_sts_v2"), ("voice_settings", json.dumps(settings))):
+            body += f"--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{val}\r\n".encode()
+        body += (f"--{bnd}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"a.mp3\"\r\n"
+                 f"Content-Type: audio/mpeg\r\n\r\n").encode() + src + f"\r\n--{bnd}--\r\n".encode()
+        try:
+            raw = http(f"https://api.elevenlabs.io/v1/speech-to-speech/{voice}?output_format=mp3_44100_128",
+                       data=body, headers={"xi-api-key": key, "Content-Type": f"multipart/form-data; boundary={bnd}"},
+                       timeout=180)
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode("utf-8", "ignore")
+            last_err = f"{e.code} {msg[:200]}"
+            if e.code in (402, 403, 404) and "quota" not in msg:
+                print(f"    Stimme {voice} nicht verfügbar ({e.code}) – nehme nächste")
+                bad.parent.mkdir(parents=True, exist_ok=True)
+                with open(bad, "a") as f:
+                    f.write(voice + "\n")
+                continue
+            raise SystemExit(f"ElevenLabs-Fehler: {last_err}")
+        Path(out_mp3).write_bytes(raw)
+        cm.parent.mkdir(parents=True, exist_ok=True)
+        _sh.copy(out_mp3, cm)
+        return voice
+    raise SystemExit(f"Keine ElevenLabs-Stimme nutzbar: {last_err}")
+
+
+def tts_edge(text, out_mp3, rate="-6%", pitch="-2Hz", voice=None):
     import edge_tts
     import edge_tts.communicate as c
     c._SSL_CTX = ssl_ctx()
 
     async def go():
         words, audio = [], bytearray()
-        com = edge_tts.Communicate(text, EDGE_VOICE, rate=rate, pitch=pitch, boundary="WordBoundary")
+        com = edge_tts.Communicate(text, voice or EDGE_VOICE, rate=rate, pitch=pitch, boundary="WordBoundary")
         async for ch in com.stream():
             if ch["type"] == "audio":
                 audio.extend(ch["data"])
@@ -232,7 +274,7 @@ def mixkit_items(url):
     return items
 
 
-BAD_CLIPS = {"32645"}   # unpassend/albern (z. B. Hypnose-Gesicht bei "brain")
+BAD_CLIPS = {"32645", "47325"}   # unpassend/albern (z. B. Hypnose-Gesicht bei "brain")
 
 
 def mixkit_search(query, vertical=False):
@@ -246,7 +288,7 @@ def mixkit_search(query, vertical=False):
     items += mixkit_items(f"https://mixkit.co/free-stock-video/discover/?q={urllib.parse.quote_plus(q)}")
     best = {}
     for it in items:
-        if re.search(r"green screen|chroma|brainstorm|logo|mockup|template|text space|hypno|buddha|cartoon|funny|comic|crazy|kitten|cat |puppy|dog|pasta|food", it["text"]) or it["id"] in BAD_CLIPS:
+        if re.search(r"green screen|chroma|brainstorm|logo|mockup|template|text space|hypno|buddha|cartoon|funny|comic|crazy|kitten|cat |puppy|dog|pasta|food|dough|knead|cooking", it["text"]) or it["id"] in BAD_CLIPS:
             continue
         hits = sum(1 for w in words if re.search(r"\b" + re.escape(w), it["text"]))
         if hits == 0:

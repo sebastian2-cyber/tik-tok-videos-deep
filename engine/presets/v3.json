@@ -1,0 +1,19 @@
+{
+  "_info": "Preset v3 – wie v2 (9:16, echte SFX, Mastering), aber akzentfreie Stimme: deutsche Muttersprachler-Stimme (Microsoft Conrad) spricht, ElevenLabs Voice Changer macht daraus Otto (Bezahl-Plan) bzw. Brian (Free). Schnitte auf den Musik-Beat. Aktiv mit \"preset\": \"v3\".",
+  "vertical": true,
+  "voice_pipeline": "sts",
+  "sts_source": "de-DE-ConradNeural",
+  "rate": "-9%",
+  "pitch": "-4Hz",
+  "sfx": "samples",
+  "audio_master": true,
+  "max_shot": 2.0,
+  "beat_snap": true,
+  "music_volume": 0.5,
+  "cut_flash": false,
+  "caption_scale": 1.18,
+  "text_anchor_vertical": 0.42,
+  "shake": 0.6,
+  "hook_sfx": "impact_soft",
+  "whoosh_chance": 0.45
+}

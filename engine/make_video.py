@@ -111,9 +111,18 @@ def build_voice(spec, beats, work, use_eleven, key):
             next_t = " ".join(say_of(i) for i in range(idxs[-1] + 1, min(len(beats), idxs[-1] + 3)))
             model = spec.get("voice_model")
             tone = beats[idxs[0]].get("tone")
-            if tone and model == "eleven_v3":
-                say = f"[{tone}] {say}"
-            words = S.tts_eleven(say, prev_t, next_t, key, mp3, model=model)
+            if spec.get("voice_pipeline") == "sts":
+                # Preset v3: deutsche Muttersprachler-Stimme spricht -> Voice Changer macht daraus die Zielstimme
+                src = work / f"src{gi:02d}.mp3"
+                words = S.tts_edge(say, src, rate=spec.get("rate", "-8%"), pitch=spec.get("pitch", "-4Hz"),
+                                   voice=spec.get("sts_source", "de-DE-ConradNeural"))
+                used = S.sts_eleven(src, key, mp3)
+                if gi == 0:
+                    print(f"    Stimme: {spec.get('sts_source', 'de-DE-ConradNeural')} -> ElevenLabs {used}")
+            else:
+                if tone and model == "eleven_v3":
+                    say = f"[{tone}] {say}"
+                words = S.tts_eleven(say, prev_t, next_t, key, mp3, model=model)
         else:
             words = S.tts_edge(say, mp3, rate=spec.get("rate", "-6%"), pitch=spec.get("pitch", "-2Hz"))
         a, words = S.trim_silence(S.decode(mp3), words)
@@ -175,7 +184,26 @@ def render_bg(clip, dur, W, H, path, rng, style):
            "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(path)])
 
 
-def build_background(beats, total, W, H, work, rng, style, max_shot=2.8):
+def music_beats(path, total):
+    """Beat-Zeitpunkte der Musik (gecacht)."""
+    import hashlib
+    cf = CACHE / "beats" / (hashlib.md5(str(path).encode()).hexdigest()[:10] + ".npy")
+    if not cf.exists():
+        import librosa
+        y, sr = librosa.load(str(path), sr=22050, mono=True)
+        _, bt = librosa.beat.beat_track(y=y, sr=sr)
+        bt = librosa.frames_to_time(bt, sr=sr)
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        np.save(cf, np.concatenate([bt, [len(y) / sr]]))
+    arr = np.load(cf)
+    bt, ln = arr[:-1], arr[-1]
+    if len(bt) > 1 and np.median(np.diff(bt)) > 0.9:      # langsame Musik: halbe Beats dazunehmen
+        bt = np.sort(np.concatenate([bt, (bt[:-1] + bt[1:]) / 2]))
+    reps = int(total // ln) + 1                       # Musik wird geloopt
+    return np.concatenate([bt + k * ln for k in range(reps)])
+
+
+def build_background(beats, total, W, H, work, rng, style, max_shot=2.8, beat_times=None):
     groups = []
     for b in beats:
         if groups and b.get("same_clip"):
@@ -194,6 +222,14 @@ def build_background(beats, total, W, H, work, rng, style, max_shot=2.8):
             q = qs[k % len(qs):] + qs[:k % len(qs)]
             split.append({"q": q, "start": g["start"] + d * k / n, "end": g["start"] + d * (k + 1) / n})
     groups = split
+    if beat_times is not None and len(beat_times):
+        # Schnittpunkte auf den nächsten Musik-Beat legen (max. 0,25 s verschieben)
+        for k in range(1, len(groups)):
+            c = groups[k]["start"]
+            j = int(np.argmin(np.abs(beat_times - c)))
+            nb = float(beat_times[j])
+            if abs(nb - c) <= 0.25 and nb - groups[k - 1]["start"] > 0.8 and groups[k]["end"] - nb > 0.8:
+                groups[k - 1]["end"] = groups[k]["start"] = nb
     used, files, cuts = set(), [], []
     for gi, g in enumerate(groups):
         f0, f1 = round(g["start"] * FPS), round(g["end"] * FPS)
@@ -580,7 +616,8 @@ def main():
 
     beats = spec["beats"]
     voice, total = build_voice(spec, beats, work, use_eleven, key)
-    bg, cuts = build_background(beats, total, W, H, work, rng, style, spec.get("max_shot", 2.8))
+    bg, cuts = build_background(beats, total, W, H, work, rng, style, spec.get("max_shot", 2.8),
+                                music_beats(spec.get("music", MUSIC), total) if spec.get("beat_snap") else None)
 
     blocks = make_blocks_glitch(beats, W, H) if style == "glitch" else make_blocks_type(
         beats, W, H, spec.get("caption_scale", 1.0), spec.get("text_anchor_vertical", 0.45))
